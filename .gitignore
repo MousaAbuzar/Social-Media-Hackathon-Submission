@@ -1,0 +1,22 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.next/
+out/
+dist/
+*.log
+.DS_Store
+
+# Machine-specific voice list: names audio samples that live on your own
+# TTS server, not in this repo. Ship voices.local.example.json instead.
+backend/app/providers/voices.local.json
+
+# local venv
+backend/.venv/
+*.egg-info/
+tsconfig.tsbuildinfo

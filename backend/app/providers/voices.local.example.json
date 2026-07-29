@@ -1,0 +1,16 @@
+[
+  {
+    "id": "narrator_cloned",
+    "label": "My Narrator",
+    "mode": "clone",
+    "external_id": "my_narrator.wav",
+    "description": "Cloned from reference_audio/my_narrator.wav on the Chatterbox server. 15-30s of clean, single-speaker audio gives the best result."
+  },
+  {
+    "id": "narrator_builtin",
+    "label": "Built-in Narrator",
+    "mode": "predefined",
+    "external_id": "REPLACE_WITH_A_FILE_FROM_THE_SERVERS_voices_FOLDER.wav",
+    "description": "A voice shipped with the server. List them at GET /get_predefined_voices."
+  }
+]

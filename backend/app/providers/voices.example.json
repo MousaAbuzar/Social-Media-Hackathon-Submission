@@ -1,0 +1,14 @@
+[
+  {
+    "id": "narrator_warm",
+    "label": "Warm Narrator",
+    "external_id": "REPLACE_WITH_VENDOR_VOICE_ID",
+    "description": "Measured documentary narration. Use a voice your account is licensed for."
+  },
+  {
+    "id": "narrator_bright",
+    "label": "Bright Narrator",
+    "external_id": "REPLACE_WITH_VENDOR_VOICE_ID",
+    "description": "Faster, higher-energy read for shorter formats."
+  }
+]

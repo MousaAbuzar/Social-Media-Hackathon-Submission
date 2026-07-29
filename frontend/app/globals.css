@@ -1,0 +1,217 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --border: #262b36;
+  --text: #e6e8ee;
+  --muted: #9aa3b2;
+  --accent: #5b8cff;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f85149;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+
+.sub {
+  color: var(--muted);
+  margin: 0 0 28px;
+  font-size: 14px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+textarea,
+select,
+input {
+  width: 100%;
+  background: #0d1017;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  margin-bottom: 14px;
+}
+
+textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+button {
+  background: var(--accent);
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  padding: 10px 18px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.badge {
+  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.badge.running {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.badge.completed {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.badge.failed {
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.meta {
+  display: flex;
+  gap: 22px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.err {
+  color: var(--err);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+pre {
+  background: #0d1017;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 14px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  font-size: 13px;
+  max-height: 380px;
+}
+
+audio {
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* Reset tab: pinned to the left edge, vertical, always reachable. */
+.reset-tab {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 50;
+  background: var(--err);
+  color: #fff;
+  border: 0;
+  border-radius: 0 8px 8px 0;
+  padding: 20px 9px;
+  cursor: pointer;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
+  transition: background 0.15s ease, padding-left 0.15s ease;
+}
+
+.reset-tab:hover {
+  background: #ff6b60;
+  padding-left: 14px;
+}
+
+.reset-tab:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.reset-tab-text {
+  display: block;
+  writing-mode: vertical-rl;
+  /* Upright keeps the letters readable head-on instead of rotated sideways. */
+  text-orientation: upright;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+/* On narrow screens the side tab would overlap content — dock it to the
+   bottom-left corner instead. */
+@media (max-width: 720px) {
+  .reset-tab {
+    top: auto;
+    bottom: 16px;
+    transform: none;
+    border-radius: 0 8px 8px 0;
+    padding: 10px 12px;
+  }
+
+  .reset-tab-text {
+    writing-mode: horizontal-tb;
+  }
+}
