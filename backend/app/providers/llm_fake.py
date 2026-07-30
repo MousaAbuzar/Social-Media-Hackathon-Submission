@@ -50,6 +50,11 @@ class FakeLLM:
                         for i in range(1, 9)
                     ],
                     "recommended": f"Placeholder Title 2 [{seed}]",
+                    "recommended_why": (
+                        "Placeholder comparison. Offline there is nothing to weigh "
+                        "these against each other on, so this stands in for the case "
+                        "a real model makes for its pick over the rest."
+                    ),
                 }
             )
         elif "REVIEW" in system:

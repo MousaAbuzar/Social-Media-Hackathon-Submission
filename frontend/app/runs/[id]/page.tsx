@@ -77,11 +77,13 @@ function AudioPlayer({ runId, artifact }: { runId: string; artifact: Artifact })
 function TitleChooser({
   candidates,
   recommended,
+  recommendedWhy,
   onChoose,
   busy,
 }: {
   candidates: TitleCandidate[];
   recommended: string | null;
+  recommendedWhy: string;
   onChoose: (title: string, minutes: number) => void;
   busy: boolean;
 }) {
@@ -115,13 +117,17 @@ function TitleChooser({
     <div className="panel step-active">
       <label>Step 2 — Choose a title and a length</label>
       <p className="hint">
-        Nothing is written yet. Hover a title to see why it works. Pick the one the
-        script should deliver on.
+        Nothing is written yet. Hover a title to see why it works — hover the best
+        pick to see why it beats the rest. Pick the one the script should deliver
+        on.
       </p>
 
       <ol className="titles">
         {candidates.map(({ title, why }) => {
           const isRecommended = title === recommended;
+          // The comparison only exists for the recommended title, and it is
+          // the more useful of the two, so it leads the tooltip.
+          const comparison = isRecommended ? recommendedWhy : "";
           return (
             <li key={title} className="title-item">
               <button
@@ -138,12 +144,23 @@ function TitleChooser({
                 {isRecommended && <span className="pick">Best pick</span>}
                 <span className="title-len">{title.length} chars</span>
               </button>
-              {why && (
+              {(why || comparison) && (
                 // Rendered always and revealed on hover/focus by CSS, so it
                 // costs no state and works for keyboard users too.
                 <div className="title-why" role="tooltip">
-                  {isRecommended && <strong>Recommended. </strong>}
-                  {why}
+                  {comparison ? (
+                    <p>
+                      <strong>Why this one over the others. </strong>
+                      {comparison}
+                    </p>
+                  ) : (
+                    isRecommended && (
+                      <p>
+                        <strong>Recommended.</strong>
+                      </p>
+                    )
+                  )}
+                  {why && <p className="title-why-own">{why}</p>}
                 </div>
               )}
             </li>
@@ -320,6 +337,9 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
     (titlesStage?.output?.candidates as TitleCandidate[] | undefined) ??
     titles.map((title) => ({ title, why: "" }));
   const recommended = (titlesStage?.output?.recommended as string | null | undefined) ?? null;
+  // Absent on runs generated before the comparison existed; the tooltip falls
+  // back to the pick's own rationale.
+  const recommendedWhy = (titlesStage?.output?.recommended_why as string | undefined) ?? "";
   const script = scriptStage?.output?.script as string | undefined;
   const estimatedMinutes = scriptStage?.output?.estimated_minutes as number | undefined;
   const review = stageOf(run, "review")?.output as
@@ -366,6 +386,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
         <TitleChooser
           candidates={candidates}
           recommended={recommended}
+          recommendedWhy={recommendedWhy}
           busy={busy}
           onChoose={(title, minutes) => act(() => api.selectTitle(run.id, title, minutes))}
         />

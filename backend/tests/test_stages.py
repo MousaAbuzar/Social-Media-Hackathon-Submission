@@ -38,9 +38,14 @@ def test_titles_recommend_one_of_the_candidates(ctx):
     assert output["recommended"] in output["titles"]
 
 
+def test_titles_explain_why_the_recommendation_beats_the_others(ctx):
+    # This is what the hover on the best pick shows.
+    assert stages.stage_titles(ctx).output["recommended_why"]
+
+
 def test_titles_fall_back_to_plain_lines_when_the_reply_is_not_json():
     # A model that ignores the JSON contract costs the rationales, not the run.
-    candidates, recommended = stages._parse_candidates(
+    candidates, recommended, recommended_why = stages._parse_candidates(
         "How Black Holes Bend Time\nWhat Falls Into a Black Hole", count=5
     )
     assert [c["title"] for c in candidates] == [
@@ -49,19 +54,35 @@ def test_titles_fall_back_to_plain_lines_when_the_reply_is_not_json():
     ]
     assert all(c["why"] == "" for c in candidates)
     assert recommended == "How Black Holes Bend Time"
+    assert recommended_why == ""
 
 
 def test_titles_ignore_a_recommendation_that_names_no_candidate():
-    _, recommended = stages._parse_candidates(
+    _, recommended, recommended_why = stages._parse_candidates(
         '{"candidates": [{"title": "How Black Holes Bend Time", "why": "x"}],'
-        ' "recommended": "A Title That Was Dropped"}',
+        ' "recommended": "A Title That Was Dropped",'
+        ' "recommended_why": "It beats the rest on search volume."}',
         count=5,
     )
     assert recommended == "How Black Holes Bend Time"
+    # The comparison argued for the dropped title, so it must not be shown
+    # against the one that replaced it.
+    assert recommended_why == ""
+
+
+def test_titles_keep_the_comparison_when_the_recommendation_stands():
+    _, recommended, recommended_why = stages._parse_candidates(
+        '{"candidates": [{"title": "How Black Holes Bend Time", "why": "x"}],'
+        ' "recommended": "How Black Holes Bend Time",'
+        ' "recommended_why": "It beats the rest on search volume."}',
+        count=5,
+    )
+    assert recommended == "How Black Holes Bend Time"
+    assert recommended_why == "It beats the rest on search volume."
 
 
 def test_titles_survive_a_markdown_fence():
-    candidates, _ = stages._parse_candidates(
+    candidates, _, _ = stages._parse_candidates(
         '```json\n{"candidates": [{"title": "How Black Holes Bend Time", "why": "x"}]}\n```',
         count=5,
     )

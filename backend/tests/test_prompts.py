@@ -25,6 +25,22 @@ def test_titles_system_renders_with_its_count():
     assert '{"candidates":' in rendered.replace(" ", "")
 
 
+def test_titles_system_asks_for_a_comparative_case_for_the_pick():
+    # The hover on the best pick is only as good as this instruction: drop the
+    # "compare" framing and the model just restates that title's own rationale.
+    rendered = prompts.TITLES_SYSTEM.format(count=5)
+    assert '"recommended_why"' in rendered
+    assert "Compare — do not restate its own" in rendered
+
+
+@pytest.mark.parametrize(
+    "rule",
+    ["Aim for 45-60 characters", "Front-load the subject", "Open a gap", "Specific beats big"],
+)
+def test_titles_system_keeps_its_best_practice_rules(rule):
+    assert rule in prompts.TITLES_SYSTEM
+
+
 def test_fake_llm_can_read_the_word_target_back_out():
     """The offline fake sizes its script by parsing the prompt.
 

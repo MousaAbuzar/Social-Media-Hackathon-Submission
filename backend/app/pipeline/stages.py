@@ -73,8 +73,11 @@ def _strip_fence(text: str) -> str:
     return "\n".join(lines[1 : -1 if lines[-1].strip().startswith("```") else None])
 
 
-def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None]:
-    """Read the titles stage's JSON reply into (candidates, recommended).
+def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None, str]:
+    """Read the reply into (candidates, recommended, recommended_why).
+
+    `recommended_why` is the comparative case for the pick — why it beats the
+    other candidates, as opposed to each candidate's own standalone rationale.
 
     Falls back to one-title-per-line when the reply is not valid JSON. A model
     that ignores the format shouldn't cost the user a failed run — they just
@@ -82,6 +85,7 @@ def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None]:
     """
     candidates: list[dict] = []
     recommended: str | None = None
+    recommended_why = ""
 
     try:
         payload = json.loads(_strip_fence(text))
@@ -98,6 +102,9 @@ def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None]:
         raw = payload.get("recommended")
         if isinstance(raw, str):
             recommended = _clean_title(raw)
+        raw_why = payload.get("recommended_why")
+        if isinstance(raw_why, str):
+            recommended_why = raw_why.strip()
 
     if not candidates:
         candidates = [
@@ -112,7 +119,10 @@ def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None]:
     # worse than none — the UI would badge nothing and the user would wonder.
     if recommended not in titles:
         recommended = titles[0] if titles else None
-    return candidates, recommended
+        # The comparison argued for a title that is no longer on the list, so
+        # it now describes nothing. Drop it rather than mislead the hover.
+        recommended_why = ""
+    return candidates, recommended, recommended_why
 
 
 def content_hash(*parts: str) -> str:
@@ -137,7 +147,9 @@ def stage_titles(ctx: StageContext) -> StageResult:
         max_tokens=2000,
     )
 
-    candidates, recommended = _parse_candidates(result.text, settings.title_count)
+    candidates, recommended, recommended_why = _parse_candidates(
+        result.text, settings.title_count
+    )
     if not candidates:
         raise ValueError("Model returned no usable titles")
 
@@ -149,6 +161,7 @@ def stage_titles(ctx: StageContext) -> StageResult:
             "titles": [c["title"] for c in candidates],
             "candidates": candidates,
             "recommended": recommended,
+            "recommended_why": recommended_why,
         },
         input_tokens=result.usage.input_tokens,
         output_tokens=result.usage.output_tokens,

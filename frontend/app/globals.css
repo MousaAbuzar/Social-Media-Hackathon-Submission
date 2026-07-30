@@ -274,6 +274,21 @@ audio {
   color: var(--ok);
 }
 
+/* No global paragraph reset in this sheet, so clear the UA margin here. */
+.title-why p {
+  margin: 0;
+}
+
+.title-why p + p {
+  margin-top: 8px;
+}
+
+/* The pick's own rationale sits under the comparison, which is the reason the
+   user opened the tooltip — keep it secondary. */
+.title-why-own {
+  color: var(--muted);
+}
+
 .title-item:hover .title-why,
 .title-item:focus-within .title-why {
   opacity: 1;
