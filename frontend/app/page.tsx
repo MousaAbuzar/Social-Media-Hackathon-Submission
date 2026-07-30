@@ -2,67 +2,59 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { RESET_EVENT } from "@/components/ResetButton";
-import { api, formatCost, type RunSummary, type Voice } from "@/lib/api";
+import { api, formatCost, type RunSummary } from "@/lib/api";
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: "queued",
+  running: "working",
+  awaiting_input: "needs you",
+  completed: "done",
+  failed: "failed",
+  canceled: "canceled",
+};
 
 export default function HomePage() {
   const router = useRouter();
   const [topic, setTopic] = useState("");
-  const [voiceId, setVoiceId] = useState("");
-  const [voices, setVoices] = useState<Voice[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setToken(window.localStorage.getItem("scriptcast_token") ?? "");
-  }, []);
-
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      const [v, r] = await Promise.all([api.voices(), api.listRuns()]);
-      setVoices(v);
-      setRuns(r);
-      setVoiceId((current) => current || v[0]?.id || "");
+      setRuns(await api.listRuns());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (token) void load();
-  }, [token]);
+    void load();
+  }, [load]);
 
   // The reset tab lives in the layout, so it reaches the form by event rather
   // than by prop drilling through a server component.
   useEffect(() => {
     const onReset = () => {
       setTopic("");
-      setVoiceId(voices[0]?.id ?? "");
       setError(null);
       setBusy(false);
-      // Pull the run list again so a run started moments ago shows up.
       void load();
     };
     window.addEventListener(RESET_EVENT, onReset);
     return () => window.removeEventListener(RESET_EVENT, onReset);
-  }, [voices]);
-
-  const saveToken = (value: string) => {
-    window.localStorage.setItem("scriptcast_token", value);
-    setToken(value);
-  };
+  }, [load]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const run = await api.createRun(topic, voiceId);
+      const run = await api.createRun(topic);
       router.push(`/runs/${run.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -72,19 +64,8 @@ export default function HomePage() {
 
   return (
     <>
-      <div className="panel">
-        <label htmlFor="token">API token</label>
-        <input
-          id="token"
-          type="password"
-          value={token}
-          placeholder="APP_TOKEN from your .env"
-          onChange={(e) => saveToken(e.target.value)}
-        />
-      </div>
-
       <form className="panel" onSubmit={submit}>
-        <label htmlFor="topic">Topic</label>
+        <label htmlFor="topic">Step 1 — What is the video about?</label>
         <textarea
           id="topic"
           value={topic}
@@ -93,31 +74,28 @@ export default function HomePage() {
           required
           minLength={3}
         />
+        <p className="hint">
+          You&apos;ll get five title options to choose from next. Nothing is written until you pick
+          one.
+        </p>
 
-        <label htmlFor="voice">Voice</label>
-        <select id="voice" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
-          {voices.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.label} — {v.description}
-            </option>
-          ))}
-        </select>
-
-        <button type="submit" disabled={busy || !topic.trim() || !voiceId}>
-          {busy ? "Starting…" : "Generate"}
+        <button type="submit" disabled={busy || topic.trim().length < 3}>
+          {busy ? "Getting titles…" : "Get title options"}
         </button>
         {error && <p className="err">{error}</p>}
       </form>
 
       <div className="panel">
         <label>Recent runs</label>
-        {runs.length === 0 && <p className="sub">Nothing yet.</p>}
+        {runs.length === 0 && <p className="hint">Nothing yet.</p>}
         {runs.map((run) => (
           <div className="row" key={run.id}>
             <Link href={`/runs/${run.id}`}>{run.chosen_title ?? run.topic}</Link>
             <span className="meta">
               <span>{formatCost(run.cost_micros)}</span>
-              <span className={`badge ${run.status}`}>{run.status}</span>
+              <span className={`badge ${run.status}`}>
+                {STATUS_LABEL[run.status] ?? run.status}
+              </span>
             </span>
           </div>
         ))}

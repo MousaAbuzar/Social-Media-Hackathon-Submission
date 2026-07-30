@@ -1,8 +1,24 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+/**
+ * The bearer token every request carries.
+ *
+ * Supplied by the deployment rather than typed into the UI. This is a
+ * single-user tool behind one shared secret, so asking for it on every visit
+ * bought nothing — the browser bundle and the API read the same APP_TOKEN.
+ */
+export const APP_TOKEN = process.env.NEXT_PUBLIC_APP_TOKEN ?? "dev-local-token";
+
 export type StageName = "titles" | "script" | "review" | "tts" | "package";
 export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
-export type RunStatus = "pending" | "running" | "completed" | "failed" | "canceled";
+export type RunStatus =
+  | "pending"
+  | "running"
+  // Parked on a decision you need to make, not an error.
+  | "awaiting_input"
+  | "completed"
+  | "failed"
+  | "canceled";
 
 export interface Stage {
   name: StageName;
@@ -23,11 +39,25 @@ export interface Artifact {
   meta: Record<string, unknown> | null;
 }
 
+/** One generated title plus the case for choosing it. */
+export interface TitleCandidate {
+  title: string;
+  why: string;
+}
+
+export interface ScriptLengthSettings {
+  default_minutes: number;
+  min_minutes: number;
+  max_minutes: number;
+  words_per_minute: number;
+}
+
 export interface Run {
   id: string;
   topic: string;
-  voice_id: string;
+  voice_id: string | null;
   chosen_title: string | null;
+  target_minutes: number | null;
   status: RunStatus;
   error: string | null;
   input_tokens: number;
@@ -56,17 +86,12 @@ export interface Voice {
   description: string;
 }
 
-function token(): string {
-  if (typeof window === "undefined") return "";
-  return window.localStorage.getItem("scriptcast_token") ?? "";
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_URL}/api${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token()}`,
+      Authorization: `Bearer ${APP_TOKEN}`,
       ...(init.headers ?? {}),
     },
   });
@@ -78,13 +103,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  settings: () => request<ScriptLengthSettings>("/settings"),
   voices: () => request<Voice[]>("/voices"),
   listRuns: () => request<RunSummary[]>("/runs"),
   getRun: (id: string) => request<Run>(`/runs/${id}`),
-  createRun: (topic: string, voiceId: string) =>
-    request<Run>("/runs", {
+  createRun: (topic: string) =>
+    request<Run>("/runs", { method: "POST", body: JSON.stringify({ topic }) }),
+  selectTitle: (id: string, title: string, targetMinutes: number) =>
+    request<Run>(`/runs/${id}/title`, {
       method: "POST",
-      body: JSON.stringify({ topic, voice_id: voiceId }),
+      body: JSON.stringify({ title, target_minutes: targetMinutes }),
+    }),
+  selectVoice: (id: string, voiceId: string) =>
+    request<Run>(`/runs/${id}/voice`, {
+      method: "POST",
+      body: JSON.stringify({ voice_id: voiceId }),
     }),
   retryRun: (id: string) => request<Run>(`/runs/${id}/retry`, { method: "POST" }),
   artifactUrl: (runId: string, artifactId: string) =>

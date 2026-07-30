@@ -30,6 +30,7 @@ def ctx():
     return StageContext(
         run_id="00000000-0000-0000-0000-000000000001",
         topic="Why do black holes have an event horizon?",
+        chosen_title="Why Black Holes Have a Point of No Return",
         voice_id="narrator_default",
         prior={},
     )

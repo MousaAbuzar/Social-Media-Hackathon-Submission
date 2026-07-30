@@ -85,6 +85,10 @@ services:
     command: npm run dev
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      # The UI no longer asks for the token, so the deployment supplies it.
+      # Interpolated from .env by Compose — deliberately not env_file, which
+      # would hand the web container the API keys it has no use for.
+      NEXT_PUBLIC_APP_TOKEN: ${APP_TOKEN:-dev-local-token}
       NEXT_TELEMETRY_DISABLED: "1"
     ports:
       # Host port is configurable so a busy 3000 does not block the stack.

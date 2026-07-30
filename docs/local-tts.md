@@ -16,61 +16,73 @@ needs a CUDA image that has nothing to do with this app.
   nvidia-smi` should print your card. If that fails, use the native install
   below instead — it's less fiddly on Windows than fixing GPU passthrough.
 
-## Start the server
+## Install
 
 ```bash
 git clone https://github.com/devnen/Chatterbox-TTS-Server.git
-cd Chatterbox-TTS-Server
+powershell -ExecutionPolicy Bypass -File scripts/setup-local-tts.ps1
+```
+
+The script installs natively rather than via Docker: it needs ~8 GB instead of
+~20 GB and skips GPU passthrough entirely. It moves the clone to
+`C:\dev\Chatterbox-TTS-Server` (off OneDrive, which would try to sync the
+model cache), frees disk, builds a venv, installs the `cu128` wheels, and
+reports whether the GPU was found. Re-running it is safe.
+
+Three of its steps exist only because upstream's dependencies fight each
+other, and all three are silent until something fails much later:
+
+- The engine package, `chatterbox-tts`, is deliberately absent from the
+  requirements file — its metadata pins an older torch and a normal install
+  quietly downgrades the CUDA build. It goes in separately with `--no-deps`.
+- `--no-deps` then leaves protobuf at 3.19, because `descript-audiotools`
+  caps it below 3.20 while onnx needs 3.20.2+. The server imports fine right
+  up until onnx raises `cannot import name 'builder'`. The script pins 3.20.3;
+  the pin only affects a TensorBoard logger that inference never calls, and
+  pip's conflict warning about it is expected.
+- The `cu128` requirements are labelled for Blackwell (RTX 50xx), and
+  upstream points 20/30/40-series cards at `requirements-nvidia.txt`. cu128
+  covers those architectures too and is what this was tested on (RTX 4050).
+  Swap files if the engine misbehaves at runtime.
+
+Then start the server:
+
+```bash
+cd C:\dev\Chatterbox-TTS-Server
+.\.venv\Scripts\python.exe server.py
+```
+
+First start downloads the model (a few GB). Once up, http://localhost:8004
+serves a web UI you can test in directly.
+
+**Docker instead**, if you'd rather and have ~25 GB free plus the NVIDIA
+container toolkit working:
+
+```bash
 docker compose -f docker-compose-cu128.yml up -d
 ```
 
-First start downloads the model (a few GB) and takes a while. When it's up,
-http://localhost:8004 serves a web UI you can test in directly.
+## Voices
 
-**Native alternative** (no Docker GPU setup needed):
+`backend/app/providers/voices.local.json` is the list ScriptCast shows in its
+UI. It ships pre-filled with three of the 28 voices the server bundles, plus
+one entry exercising the cloning path — so you can run a real narration before
+recording anything.
 
-```bash
-git clone https://github.com/devnen/Chatterbox-TTS-Server.git
-cd Chatterbox-TTS-Server
-python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt
-python server.py
-```
+`id` is what ScriptCast stores in the database, so keep it stable.
+`external_id` is just a filename on the server: swap the sample, keep the id,
+and past runs still make sense. `mode` picks which folder it reads from —
+`predefined` for `voices/`, `clone` for `reference_audio/`.
 
-## Add your voice
+### Using your own voice
 
-1. Record or find a **15–30 second** clip: one speaker, no music, no
-   background noise, `.wav` or `.mp3`. Quality of this clip decides quality of
-   everything after it — more audio does not help, cleaner audio does.
-2. Drop it in the server's `reference_audio/` folder, e.g.
-   `reference_audio/my_narrator.wav`.
-3. In this repo, copy the example voice list and point it at that file:
+1. Record a **15–30 second** clip: one speaker, no music, no background noise,
+   `.wav` or `.mp3`. This clip decides the quality of everything downstream —
+   more audio does not help, cleaner audio does.
+2. Drop it in `C:\dev\Chatterbox-TTS-Server\reference_audio\`.
+3. Point the `narrator_cloned` entry's `external_id` at your filename.
 
-   ```bash
-   cp backend/app/providers/voices.local.example.json \
-      backend/app/providers/voices.local.json
-   ```
-
-   Edit it so `external_id` is your filename:
-
-   ```json
-   [
-     {
-       "id": "narrator_cloned",
-       "label": "My Narrator",
-       "mode": "clone",
-       "external_id": "my_narrator.wav",
-       "description": "Documentary read."
-     }
-   ]
-   ```
-
-   `id` is what ScriptCast stores in the database and shows in the UI, so keep
-   it stable. `external_id` is just the filename on the server — change the
-   sample, keep the id, and old runs still make sense.
-
-   To use a voice that ships with the server instead of your own, set
-   `"mode": "predefined"` and use a filename from `GET /get_predefined_voices`.
+The full list of bundled voices is at `GET /get_predefined_voices`.
 
 ## Point ScriptCast at it
 
@@ -78,11 +90,17 @@ In `.env`:
 
 ```
 TTS_PROVIDER=local
-TTS_LOCAL_URL=http://host.docker.internal:8004
+TTS_LOCAL_URL=http://localhost:8004
 ```
 
-Use `http://localhost:8004` instead if you run the backend directly on Windows
-rather than in Compose.
+Use `http://host.docker.internal:8004` instead if you run api/worker inside
+Compose. The rule of thumb: match whatever `DATABASE_URL` and
+`S3_ENDPOINT_URL` already use, since they face the same choice.
+
+`env_file` in `config.py` is a relative path, so the backend only sees `.env`
+when started from the repo root. Started from `backend/`, it silently falls
+back to the defaults in `config.py` — which means `TTS_PROVIDER=fake` and
+silent WAVs, with nothing in the log to say why.
 
 ```bash
 docker compose up -d --force-recreate api worker

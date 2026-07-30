@@ -132,6 +132,10 @@ button.ghost {
   color: var(--err);
   border-color: var(--err);
 }
+.badge.awaiting_input {
+  color: var(--warn);
+  border-color: var(--warn);
+}
 
 .meta {
   display: flex;
@@ -161,6 +165,138 @@ pre {
 audio {
   width: 100%;
   margin-top: 10px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+
+.topic-line {
+  margin: 10px 0 0;
+}
+
+/* The panel holding the decision you need to make right now. */
+.step-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.25);
+}
+
+.titles {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.title-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  text-align: left;
+  background: #0d1017;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 13px 15px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.title-option:hover {
+  border-color: var(--accent);
+}
+
+.title-option.selected {
+  border-color: var(--accent);
+  background: rgba(91, 140, 255, 0.1);
+}
+
+.title-text {
+  flex: 1;
+}
+
+.title-len {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* The model's pick. Marked on the option itself so it reads without hovering. */
+.pick {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ok);
+  border: 1px solid var(--ok);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* Anchor for the rationale popup. */
+.title-item {
+  position: relative;
+}
+
+.title-why {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  background: #0b0e14;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 11px 13px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  /* Hidden by default, revealed on hover/focus. visibility rather than
+     display so the fade has something to animate. */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  pointer-events: none;
+}
+
+.title-why strong {
+  color: var(--ok);
+}
+
+.title-item:hover .title-why,
+.title-item:focus-within .title-why {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* The minutes field is a number, not a sentence — don't let it span the row. */
+.minutes-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.minutes-row input {
+  width: 110px;
+  margin-bottom: 0;
+}
+
+.minutes-unit {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* Reset tab: pinned to the left edge, vertical, always reachable. */

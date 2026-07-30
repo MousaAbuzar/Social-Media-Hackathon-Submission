@@ -10,8 +10,15 @@ the job orchestration around them.
 ## Pipeline
 
 ```
-topic ──▶ titles ──▶ script ──▶ review ──▶ tts ──▶ package ──▶ audio + metadata
+topic ──▶ titles ──▶ [pick title + length] ──▶ script ──▶ review
+                                                            │
+                            audio + metadata ◀── package ◀── tts ◀── [pick voice]
 ```
+
+The titles stage returns each candidate with the case for choosing it and names
+the strongest one, so the pick is informed rather than a coin flip. Length is
+requested in **minutes of narration** — the unit that actually matters — and
+converted to a word target at 150 wpm (`WORDS_PER_MINUTE`).
 
 Each stage is a committed database row. The worker runs **one stage per task**
 and re-enqueues itself for the next, which buys three things:
@@ -97,7 +104,8 @@ docker compose exec api alembic upgrade head
 - API docs: http://localhost:8000/docs
 - MinIO console: http://localhost:9001 (`minioadmin` / `minioadmin`)
 
-Paste the `APP_TOKEN` from your `.env` into the token field in the UI.
+The UI reads `APP_TOKEN` from your `.env` at startup, so there is nothing to
+paste in. Changing the token means restarting the `web` container.
 
 **If port 3000 is already taken**, set `WEB_PORT` in `.env` (e.g. `WEB_PORT=3006`)
 and add the matching origin to `CORS_ORIGINS` — the API rejects browser

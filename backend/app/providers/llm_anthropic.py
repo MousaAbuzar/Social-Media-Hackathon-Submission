@@ -22,18 +22,28 @@ class AnthropicLLM:
     def complete(self, *, system: str, prompt: str, max_tokens: int) -> LLMResult:
         # Streaming so long scripts don't trip the SDK's HTTP timeout guard;
         # get_final_message() gives us the assembled response.
-        with self._client.messages.stream(
+        #
+        # `fallbacks="default"` re-runs a safety-declined request on Anthropic's
+        # recommended substitute inside the same call, routed by refusal
+        # category. Science topics brush against the bio and cyber classifiers
+        # often enough that a hard failure mid-run isn't worth the risk.
+        with self._client.beta.messages.stream(
             model=self.model,
             max_tokens=max_tokens,
             system=system,
             thinking={"type": "adaptive"},
             output_config={"effort": "high"},
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
             messages=[{"role": "user", "content": prompt}],
         ) as stream:
             message = stream.get_final_message()
 
+        # A refusal here means the fallback declined too. Check before reading
+        # content — on a refusal there may be nothing in it.
         if message.stop_reason == "refusal":
-            raise RuntimeError("Model declined the request")
+            detail = getattr(message.stop_details, "category", None) or "unspecified"
+            raise RuntimeError(f"Model declined the request ({detail})")
 
         text = "".join(block.text for block in message.content if block.type == "text")
         return LLMResult(

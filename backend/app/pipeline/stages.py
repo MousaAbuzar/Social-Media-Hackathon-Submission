@@ -40,9 +40,79 @@ class StageResult:
 class StageContext:
     run_id: str
     topic: str
-    voice_id: str
+    # Both are None until the user picks them; the runner gates the stages that
+    # need them, so a stage body can treat its own gate field as present.
+    chosen_title: str | None
+    voice_id: str | None
     # Outputs of every stage completed so far, keyed by stage name.
     prior: dict[str, dict]
+    # Requested narration length. Arrives with the title; None on runs created
+    # before script length was selectable, which fall back to the default.
+    target_minutes: int | None = None
+
+
+def _clean_title(line: str) -> str:
+    """Strip the list scaffolding models add even when told not to."""
+    text = line.strip().lstrip("-*•").strip()
+    # Leading "1." / "3)" numbering.
+    if text[:1].isdigit():
+        for sep in (". ", ") ", "- ", ": "):
+            head, found, tail = text.partition(sep)
+            if found and head.isdigit():
+                text = tail
+                break
+    return text.strip().strip('"').strip("'").strip()
+
+
+def _strip_fence(text: str) -> str:
+    """Drop a ```json fence, which models add even when told not to."""
+    body = text.strip()
+    if not body.startswith("```"):
+        return body
+    lines = body.splitlines()
+    return "\n".join(lines[1 : -1 if lines[-1].strip().startswith("```") else None])
+
+
+def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None]:
+    """Read the titles stage's JSON reply into (candidates, recommended).
+
+    Falls back to one-title-per-line when the reply is not valid JSON. A model
+    that ignores the format shouldn't cost the user a failed run — they just
+    lose the rationales, which are advisory.
+    """
+    candidates: list[dict] = []
+    recommended: str | None = None
+
+    try:
+        payload = json.loads(_strip_fence(text))
+    except (json.JSONDecodeError, ValueError):
+        payload = None
+
+    if isinstance(payload, dict):
+        for entry in payload.get("candidates") or []:
+            if not isinstance(entry, dict):
+                continue
+            title = _clean_title(str(entry.get("title", "")))
+            if len(title) > 5:
+                candidates.append({"title": title, "why": str(entry.get("why", "")).strip()})
+        raw = payload.get("recommended")
+        if isinstance(raw, str):
+            recommended = _clean_title(raw)
+
+    if not candidates:
+        candidates = [
+            {"title": t, "why": ""}
+            for t in (_clean_title(line) for line in text.splitlines() if line.strip())
+            if len(t) > 5
+        ]
+
+    candidates = candidates[:count]
+    titles = [c["title"] for c in candidates]
+    # A recommendation that doesn't name one of the surviving candidates is
+    # worse than none — the UI would badge nothing and the user would wonder.
+    if recommended not in titles:
+        recommended = titles[0] if titles else None
+    return candidates, recommended
 
 
 def content_hash(*parts: str) -> str:
@@ -67,13 +137,19 @@ def stage_titles(ctx: StageContext) -> StageResult:
         max_tokens=2000,
     )
 
-    titles = [line.strip(" -•\t") for line in result.text.splitlines() if line.strip()]
-    titles = [t for t in titles if len(t) > 5][: settings.title_count]
-    if not titles:
+    candidates, recommended = _parse_candidates(result.text, settings.title_count)
+    if not candidates:
         raise ValueError("Model returned no usable titles")
 
+    # Deliberately no "chosen" key: picking is the user's job, and the run
+    # parks at the gate until they do it. `titles` stays a flat list of strings
+    # so the package stage and older runs keep reading the same shape.
     return StageResult(
-        output={"titles": titles, "chosen": titles[0]},
+        output={
+            "titles": [c["title"] for c in candidates],
+            "candidates": candidates,
+            "recommended": recommended,
+        },
         input_tokens=result.usage.input_tokens,
         output_tokens=result.usage.output_tokens,
         cost_micros=llm.cost_micros(result.usage),
@@ -90,23 +166,45 @@ def titles_hash(ctx: StageContext) -> str:
 def stage_script(ctx: StageContext) -> StageResult:
     settings = get_settings()
     llm = get_llm()
-    title = ctx.prior[StageName.titles.value]["chosen"]
+    title = ctx.chosen_title
+    if not title:
+        raise ValueError("Script stage reached without a chosen title")
+
+    minutes = ctx.target_minutes or settings.default_script_minutes
+    target_words = minutes * settings.words_per_minute
+    # ~1.4 tokens per English word. The multiplier covers three things at once:
+    # overshoot, the closing sentence, and — the big one — reasoning tokens,
+    # which count against this same ceiling. A truncated script is a paid call
+    # thrown away, so the headroom is cheap insurance.
+    max_tokens = min(128_000, max(4_000, int(target_words * 4)))
 
     result = llm.complete(
-        system=prompts.SCRIPT_SYSTEM.format(words=settings.target_script_words),
+        system=prompts.SCRIPT_SYSTEM.format(
+            words=target_words, minutes=minutes, wpm=settings.words_per_minute
+        ),
         prompt=prompts.SCRIPT_PROMPT.format(title=title, topic=ctx.topic),
-        max_tokens=16000,
+        max_tokens=max_tokens,
     )
 
     script = result.text
-    if len(script.split()) < 50:
+    word_count = len(script.split())
+    if word_count < 50:
         raise ValueError("Script came back implausibly short")
 
     key = f"runs/{ctx.run_id}/script.txt"
     size = put_object(key, script.encode("utf-8"), "text/plain; charset=utf-8")
 
     return StageResult(
-        output={"title": title, "word_count": len(script.split()), "script": script},
+        output={
+            "title": title,
+            "word_count": word_count,
+            "target_minutes": minutes,
+            "target_words": target_words,
+            # What the script will actually take to read at the configured
+            # pace, so the UI can show the gap against what was asked for.
+            "estimated_minutes": round(word_count / settings.words_per_minute, 1),
+            "script": script,
+        },
         input_tokens=result.usage.input_tokens,
         output_tokens=result.usage.output_tokens,
         cost_micros=llm.cost_micros(result.usage),
@@ -116,14 +214,18 @@ def stage_script(ctx: StageContext) -> StageResult:
                 s3_key=key,
                 content_type="text/plain; charset=utf-8",
                 size_bytes=size,
-                meta={"word_count": len(script.split())},
+                meta={"word_count": word_count, "target_minutes": minutes},
             )
         ],
     )
 
 
 def script_hash(ctx: StageContext) -> str:
-    return content_hash("script", ctx.topic, ctx.prior[StageName.titles.value]["chosen"])
+    # Length is part of the input: asking for 25 minutes after 5 must not
+    # reuse the 5-minute script from the cache.
+    return content_hash(
+        "script", ctx.topic, ctx.chosen_title or "", str(ctx.target_minutes or "")
+    )
 
 
 # --- Stage: review -----------------------------------------------------
@@ -164,6 +266,8 @@ def review_hash(ctx: StageContext) -> str:
 
 def stage_tts(ctx: StageContext) -> StageResult:
     tts = get_tts()
+    if not ctx.voice_id:
+        raise ValueError("TTS stage reached without a chosen voice")
     voice = resolve_voice(ctx.voice_id)
     script = ctx.prior[StageName.script.value]["script"]
 
@@ -196,7 +300,7 @@ def stage_tts(ctx: StageContext) -> StageResult:
 
 def tts_hash(ctx: StageContext) -> str:
     return content_hash(
-        "tts", ctx.prior[StageName.script.value]["script"], ctx.voice_id, get_tts().name
+        "tts", ctx.prior[StageName.script.value]["script"], ctx.voice_id or "", get_tts().name
     )
 
 
@@ -209,17 +313,20 @@ def stage_package(ctx: StageContext) -> StageResult:
     script_out = ctx.prior[StageName.script.value]
     review = ctx.prior[StageName.review.value]
 
+    chosen = script_out["title"]
     metadata = {
-        "title": script_out["title"],
-        "alternate_titles": titles["titles"][1:],
+        "title": chosen,
+        "alternate_titles": [t for t in titles["titles"] if t != chosen],
         "topic": ctx.topic,
         "word_count": script_out["word_count"],
+        "estimated_minutes": script_out.get("estimated_minutes"),
         "voice_id": ctx.prior[StageName.tts.value]["voice_id"],
         "review_passed": review["passed"],
         "review_findings": review["findings"],
         "disclosure": (
             "This video's narration is synthetic, generated with a text-to-speech "
-            "voice from a written script."
+            "voice from a written script. It is not the voice of, written by, or "
+            "affiliated with any real person."
         ),
     }
 

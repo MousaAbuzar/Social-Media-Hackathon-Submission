@@ -64,16 +64,15 @@ def test_voices_are_listed(client):
     assert any(v["id"] == "narrator_default" for v in response.json())
 
 
-def test_create_run_returns_pending_and_enqueues_work(client):
-    response = client.post(
-        "/api/runs",
-        headers=AUTH,
-        json={"topic": "How do neutron stars form?", "voice_id": "narrator_default"},
-    )
+def test_create_run_takes_a_topic_only(client):
+    response = client.post("/api/runs", headers=AUTH, json={"topic": "How do neutron stars form?"})
     assert response.status_code == 201
 
     body = response.json()
     assert body["status"] == "pending"
+    # Both decisions are still outstanding at creation time.
+    assert body["chosen_title"] is None
+    assert body["voice_id"] is None
     # Stage rows exist up front, so the UI can render the pipeline immediately.
     assert [s["name"] for s in body["stages"]] == [
         "titles",
@@ -85,12 +84,50 @@ def test_create_run_returns_pending_and_enqueues_work(client):
     assert client.enqueued == [body["id"]]
 
 
-def test_unknown_voice_is_rejected(client):
+def new_run(client, topic="A perfectly fine topic") -> str:
+    return client.post("/api/runs", headers=AUTH, json={"topic": topic}).json()["id"]
+
+
+def test_choosing_a_title_before_candidates_exist_is_rejected(client):
+    run_id = new_run(client)
+    # The worker is stubbed here, so the titles stage never ran.
+    response = client.post(f"/api/runs/{run_id}/title", headers=AUTH, json={"title": "Some Title"})
+    assert response.status_code == 409
+    assert "not ready" in response.json()["detail"].lower()
+
+
+def test_choosing_a_voice_before_the_script_exists_is_rejected(client):
+    run_id = new_run(client)
     response = client.post(
-        "/api/runs",
-        headers=AUTH,
-        json={"topic": "A perfectly fine topic", "voice_id": "not-a-voice"},
+        f"/api/runs/{run_id}/voice", headers=AUTH, json={"voice_id": "narrator_default"}
     )
+    assert response.status_code == 409
+
+
+def test_unknown_voice_is_rejected(client):
+    run_id = new_run(client)
+    response = client.post(
+        f"/api/runs/{run_id}/voice", headers=AUTH, json={"voice_id": "not-a-voice"}
+    )
+    # Validated before the readiness check, so a typo is always a 422.
+    assert response.status_code == 422
+
+
+def test_script_length_settings_are_served(client):
+    body = client.get("/api/settings", headers=AUTH).json()
+    assert body["min_minutes"] <= body["default_minutes"] <= body["max_minutes"]
+    assert body["words_per_minute"] > 0
+
+
+@pytest.mark.parametrize("minutes", [0, 121, -5])
+def test_an_out_of_range_length_is_rejected(client, minutes):
+    run_id = new_run(client)
+    response = client.post(
+        f"/api/runs/{run_id}/title",
+        headers=AUTH,
+        json={"title": "Some Title", "target_minutes": minutes},
+    )
+    # Rejected on validation, before the "candidates not ready" check.
     assert response.status_code == 422
 
 
@@ -100,10 +137,5 @@ def test_missing_run_is_404(client):
 
 
 def test_retry_rejects_a_run_that_has_not_failed(client):
-    run_id = client.post(
-        "/api/runs",
-        headers=AUTH,
-        json={"topic": "Why is the sky dark at night?", "voice_id": "narrator_default"},
-    ).json()["id"]
-
+    run_id = new_run(client, "Why is the sky dark at night?")
     assert client.post(f"/api/runs/{run_id}/retry", headers=AUTH).status_code == 409

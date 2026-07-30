@@ -30,6 +30,9 @@ JsonDoc = JSON().with_variant(JSONB(), "postgresql")
 class RunStatus(StrEnum):
     pending = "pending"
     running = "running"
+    # Parked on a human decision (pick a title, pick a voice). Not an error —
+    # the run resumes the moment the missing field is supplied.
+    awaiting_input = "awaiting_input"
     completed = "completed"
     failed = "failed"
     canceled = "canceled"
@@ -62,14 +65,31 @@ STAGE_ORDER: list[StageName] = [
     StageName.package,
 ]
 
+# Stages that must not start until the user has made a choice. The runner parks
+# the run in `awaiting_input` while the named field on Run is still empty, which
+# is what turns one long automatic pipeline into a reviewable workflow:
+#
+#   topic → titles → [pick a title] → script → review → [pick a voice] → tts → package
+#
+# Gating on a persisted field rather than an in-memory flag means the pause
+# survives a worker restart, and re-enqueueing a parked run is harmless.
+STAGE_GATES: dict[StageName, str] = {
+    StageName.script: "chosen_title",
+    StageName.tts: "voice_id",
+}
+
 
 class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(), primary_key=True, default=uuid.uuid4)
     topic: Mapped[str] = mapped_column(Text)
-    voice_id: Mapped[str] = mapped_column(String(64))
+    # Both are chosen by the user partway through the run, so both start empty.
+    voice_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     chosen_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # How long the narration should run, in minutes. Chosen alongside the title
+    # at the same gate, so it is empty for exactly as long as chosen_title is.
+    target_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[RunStatus] = mapped_column(
         Enum(RunStatus, name="run_status"), default=RunStatus.pending, index=True
     )

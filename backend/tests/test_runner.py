@@ -36,7 +36,8 @@ def session():
 
 @pytest.fixture
 def run(session):
-    r = Run(id=uuid.uuid4(), topic="How do neutron stars form?", voice_id="narrator_default")
+    """A fresh run: topic only, no title and no voice chosen yet."""
+    r = Run(id=uuid.uuid4(), topic="How do neutron stars form?")
     session.add(r)
     session.flush()
     create_stage_rows(session, r)
@@ -44,21 +45,95 @@ def run(session):
     return r
 
 
-def test_run_completes_all_stages(session, run):
-    while advance(session, run.id):
+def drain(session, run_id) -> None:
+    while advance(session, run_id):
         pass
 
+
+def test_run_parks_after_titles_waiting_for_a_choice(session, run):
+    drain(session, run.id)
     session.refresh(run)
+
+    assert run.status is RunStatus.awaiting_input
+    assert run.chosen_title is None
+
+    by_name = {s.name: s for s in run.stages}
+    assert by_name[StageName.titles].status is StageStatus.completed
+    # Crucially, the expensive stage did not run.
+    assert by_name[StageName.script].status is StageStatus.pending
+    assert by_name[StageName.titles].output["titles"]
+
+
+def test_choosing_a_title_releases_the_script_then_parks_for_a_voice(session, run):
+    drain(session, run.id)
+    session.refresh(run)
+
+    run.chosen_title = "How Neutron Stars Are Born"
+    run.status = RunStatus.pending
+    session.commit()
+
+    drain(session, run.id)
+    session.refresh(run)
+
+    assert run.status is RunStatus.awaiting_input
+    by_name = {s.name: s for s in run.stages}
+    assert by_name[StageName.script].status is StageStatus.completed
+    assert by_name[StageName.review].status is StageStatus.completed
+    # Synthesis is the slow, expensive step — it waits for a voice.
+    assert by_name[StageName.tts].status is StageStatus.pending
+
+
+def test_full_gated_workflow_completes(session, run):
+    drain(session, run.id)
+    session.refresh(run)
+
+    run.chosen_title = "How Neutron Stars Are Born"
+    run.status = RunStatus.pending
+    session.commit()
+    drain(session, run.id)
+    session.refresh(run)
+
+    run.voice_id = "narrator_default"
+    run.status = RunStatus.pending
+    session.commit()
+    drain(session, run.id)
+    session.refresh(run)
+
     assert run.status is RunStatus.completed
     assert all(s.status is StageStatus.completed for s in run.stages)
-    assert run.chosen_title
+    assert run.chosen_title == "How Neutron Stars Are Born"
+
+
+def test_advancing_a_parked_run_is_a_no_op(session, run):
+    drain(session, run.id)
+    session.refresh(run)
+    attempts_before = {s.name: s.attempt for s in run.stages}
+
+    # A stray retry or duplicate task must not burn an attempt or flip status.
+    assert advance(session, run.id) is False
+    session.refresh(run)
+
+    assert run.status is RunStatus.awaiting_input
+    assert {s.name: s.attempt for s in run.stages} == attempts_before
+
+
+def complete_run(session, run):
+    drain(session, run.id)
+    session.refresh(run)
+    run.chosen_title = "How Neutron Stars Are Born"
+    run.status = RunStatus.pending
+    session.commit()
+    drain(session, run.id)
+    session.refresh(run)
+    run.voice_id = "narrator_default"
+    run.status = RunStatus.pending
+    session.commit()
+    drain(session, run.id)
+    session.refresh(run)
 
 
 def test_artifacts_are_recorded(session, run):
-    while advance(session, run.id):
-        pass
-
-    session.refresh(run)
+    complete_run(session, run)
     kinds = {a.kind for a in run.artifacts}
     assert kinds == {"script", "audio", "metadata"}
 
@@ -84,25 +159,32 @@ def test_completed_stage_is_not_re_executed(session, run):
 
 
 def test_run_is_resumable_from_the_middle(session, run):
-    advance(session, run.id)
-    advance(session, run.id)
+    drain(session, run.id)
+    session.refresh(run)
+    run.chosen_title = "How Neutron Stars Are Born"
+    run.status = RunStatus.pending
+    session.commit()
+
+    advance(session, run.id)  # script only
     session.refresh(run)
 
     done = [s.name for s in run.stages if s.status is StageStatus.completed]
     assert StageName.titles in done and StageName.script in done
-    assert run.status is RunStatus.running
+    assert StageName.review not in done
 
     # A "fresh worker" picks up exactly where the previous one stopped.
-    while advance(session, run.id):
-        pass
+    drain(session, run.id)
     session.refresh(run)
-    assert run.status is RunStatus.completed
+    assert run.status is RunStatus.awaiting_input
+    assert {s.name for s in run.stages if s.status is StageStatus.completed} >= {
+        StageName.titles,
+        StageName.script,
+        StageName.review,
+    }
 
 
 def test_cost_accumulates_across_stages(session, run):
-    while advance(session, run.id):
-        pass
-    session.refresh(run)
+    complete_run(session, run)
 
     # Fake providers are free, but the counters must still be wired up.
     assert run.input_tokens > 0

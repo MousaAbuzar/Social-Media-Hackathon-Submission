@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_token
+from app.config import get_settings
 from app.db import get_session
-from app.models import Artifact, Run, RunStatus, StageStatus
+from app.models import Artifact, Run, RunStatus, StageName, StageStatus
 from app.pipeline.runner import create_stage_rows
 from app.providers.registry import get_tts
 from app.schemas import (
@@ -18,6 +19,9 @@ from app.schemas import (
     CreateRunRequest,
     RunOut,
     RunSummary,
+    ScriptLengthOut,
+    SelectTitleRequest,
+    SelectVoiceRequest,
     StageOut,
     VoiceOut,
 )
@@ -36,6 +40,22 @@ async def _load_run(session: AsyncSession, run_id: uuid.UUID) -> Run:
     return run
 
 
+@router.get("/settings", response_model=ScriptLengthOut)
+async def script_length_settings() -> ScriptLengthOut:
+    """The length bounds the UI's minutes input should honour.
+
+    Served rather than duplicated in the frontend so the two can't drift into
+    disagreeing about what the API will accept.
+    """
+    s = get_settings()
+    return ScriptLengthOut(
+        default_minutes=s.default_script_minutes,
+        min_minutes=s.min_script_minutes,
+        max_minutes=s.max_script_minutes,
+        words_per_minute=s.words_per_minute,
+    )
+
+
 @router.get("/voices", response_model=list[VoiceOut])
 async def list_voices() -> list[VoiceOut]:
     return [
@@ -48,11 +68,8 @@ async def list_voices() -> list[VoiceOut]:
 async def create_run(
     payload: CreateRunRequest, session: AsyncSession = Depends(get_session)
 ) -> Run:
-    known = {v.id for v in get_tts().voices()}
-    if payload.voice_id not in known:
-        raise HTTPException(422, f"Unknown voice {payload.voice_id!r}. Known: {sorted(known)}")
-
-    run = Run(topic=payload.topic.strip(), voice_id=payload.voice_id)
+    """Start a run. Generates title candidates, then parks for your pick."""
+    run = Run(topic=payload.topic.strip())
     session.add(run)
     await session.flush()
     await session.run_sync(create_stage_rows, run)
@@ -74,6 +91,56 @@ async def list_runs(limit: int = 50, session: AsyncSession = Depends(get_session
 
 @router.get("/runs/{run_id}", response_model=RunOut)
 async def get_run(run_id: uuid.UUID, session: AsyncSession = Depends(get_session)) -> Run:
+    return await _load_run(session, run_id)
+
+
+@router.post("/runs/{run_id}/title", response_model=RunOut)
+async def select_title(
+    run_id: uuid.UUID,
+    payload: SelectTitleRequest,
+    session: AsyncSession = Depends(get_session),
+) -> Run:
+    """Gate 1: choose the title and length, which releases the script stage."""
+    run = await _load_run(session, run_id)
+    if run.chosen_title is not None:
+        raise HTTPException(409, "This run already has a title")
+
+    titles_stage = next((s for s in run.stages if s.name is StageName.titles), None)
+    if titles_stage is None or titles_stage.status is not StageStatus.completed:
+        raise HTTPException(409, "Title candidates are not ready yet")
+
+    run.chosen_title = payload.title.strip()
+    if payload.target_minutes is not None:
+        run.target_minutes = payload.target_minutes
+    run.status = RunStatus.pending
+    await session.commit()
+
+    advance_run.delay(str(run.id))
+    return await _load_run(session, run_id)
+
+
+@router.post("/runs/{run_id}/voice", response_model=RunOut)
+async def select_voice(
+    run_id: uuid.UUID,
+    payload: SelectVoiceRequest,
+    session: AsyncSession = Depends(get_session),
+) -> Run:
+    """Gate 2: choose the voice, which releases synthesis."""
+    run = await _load_run(session, run_id)
+
+    known = {v.id for v in get_tts().voices()}
+    if payload.voice_id not in known:
+        raise HTTPException(422, f"Unknown voice {payload.voice_id!r}. Known: {sorted(known)}")
+
+    script_stage = next((s for s in run.stages if s.name is StageName.script), None)
+    if script_stage is None or script_stage.status is not StageStatus.completed:
+        raise HTTPException(409, "The script is not ready yet")
+
+    run.voice_id = payload.voice_id
+    run.status = RunStatus.pending
+    await session.commit()
+
+    advance_run.delay(str(run.id))
     return await _load_run(session, run_id)
 
 

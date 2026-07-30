@@ -53,8 +53,14 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # Pipeline tuning
-    title_count: int = 8
-    target_script_words: int = 1200
+    title_count: int = 5
+    # Script length is requested in minutes of narration, because that is the
+    # unit the user actually cares about. Words are derived from it: 150 wpm is
+    # a common measured pace for clear educational narration.
+    words_per_minute: int = 150
+    default_script_minutes: int = 8
+    min_script_minutes: int = 1
+    max_script_minutes: int = 120
 
 
 @lru_cache

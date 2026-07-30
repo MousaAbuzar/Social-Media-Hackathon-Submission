@@ -19,12 +19,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    STAGE_GATES,
     STAGE_ORDER,
     Artifact,
     Run,
     RunStatus,
     Stage,
-    StageName,
     StageStatus,
 )
 from app.pipeline.stages import STAGE_IMPLS, StageContext
@@ -63,9 +63,23 @@ def advance(session: Session, run_id: str) -> bool:
     if run.status in (RunStatus.completed, RunStatus.failed, RunStatus.canceled):
         return False
 
+    # `awaiting_input` is resumable: the API flips it back to `pending` once the
+    # user supplies the missing choice, so falling through here is correct.
+
     stage = next_pending_stage(run)
     if stage is None:
         run.status = RunStatus.completed
+        session.commit()
+        return False
+
+    # Park rather than run when the next stage needs a decision we don't have.
+    # This is checked every time the task fires, so re-enqueueing a parked run
+    # is a no-op instead of a crash.
+    gate_field = STAGE_GATES.get(stage.name)
+    if gate_field and getattr(run, gate_field) is None:
+        if run.status is not RunStatus.awaiting_input:
+            log.info("run=%s parked before %s, needs %s", run.id, stage.name.value, gate_field)
+        run.status = RunStatus.awaiting_input
         session.commit()
         return False
 
@@ -73,8 +87,10 @@ def advance(session: Session, run_id: str) -> bool:
     ctx = StageContext(
         run_id=str(run.id),
         topic=run.topic,
+        chosen_title=run.chosen_title,
         voice_id=run.voice_id,
         prior=_prior_outputs(run),
+        target_minutes=run.target_minutes,
     )
 
     impl, hash_fn = STAGE_IMPLS[stage.name]
@@ -119,10 +135,8 @@ def advance(session: Session, run_id: str) -> bool:
     run.tts_characters += result.tts_characters
     run.cost_micros += result.cost_micros
 
-    if stage.name is StageName.titles:
-        run.chosen_title = result.output.get("chosen")
-    elif stage.name is StageName.script:
-        run.chosen_title = result.output.get("title", run.chosen_title)
+    # The titles stage deliberately does not set chosen_title — that is the
+    # user's decision, and leaving it empty is what parks the run at the gate.
 
     for spec in result.artifacts:
         existing = session.scalar(

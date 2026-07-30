@@ -7,8 +7,26 @@ from app.models import RunStatus, StageName, StageStatus
 
 
 class CreateRunRequest(BaseModel):
+    """A run starts with a topic and nothing else.
+
+    The title and voice arrive later, as separate decisions, so the pipeline
+    stops for review instead of running end to end on one click.
+    """
+
     topic: str = Field(min_length=3, max_length=2000)
-    voice_id: str = Field(default="narrator_default", max_length=64)
+
+
+class SelectTitleRequest(BaseModel):
+    # Free text rather than an index: the user may edit a suggestion, and
+    # tying the choice to a list position would break if titles regenerate.
+    title: str = Field(min_length=3, max_length=300)
+    # How many minutes the narration should run. Optional so an older client
+    # still works; the script stage falls back to the configured default.
+    target_minutes: int | None = Field(default=None, ge=1, le=120)
+
+
+class SelectVoiceRequest(BaseModel):
+    voice_id: str = Field(min_length=1, max_length=64)
 
 
 class StageOut(BaseModel):
@@ -39,8 +57,9 @@ class RunOut(BaseModel):
 
     id: uuid.UUID
     topic: str
-    voice_id: str
+    voice_id: str | None
     chosen_title: str | None
+    target_minutes: int | None
     status: RunStatus
     error: str | None
     input_tokens: int
@@ -66,6 +85,13 @@ class RunSummary(BaseModel):
     status: RunStatus
     cost_micros: int
     created_at: datetime
+
+
+class ScriptLengthOut(BaseModel):
+    default_minutes: int
+    min_minutes: int
+    max_minutes: int
+    words_per_minute: int
 
 
 class VoiceOut(BaseModel):
