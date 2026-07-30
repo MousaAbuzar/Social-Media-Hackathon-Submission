@@ -138,7 +138,7 @@ def content_hash(*parts: str) -> str:
 
 def stage_titles(ctx: StageContext) -> StageResult:
     settings = get_settings()
-    llm = get_llm()
+    llm = get_llm(settings.titles_model)
 
     system = prompts.TITLES_SYSTEM.format(count=settings.title_count)
     result = llm.complete(
@@ -170,7 +170,12 @@ def stage_titles(ctx: StageContext) -> StageResult:
 
 
 def titles_hash(ctx: StageContext) -> str:
-    return content_hash("titles", ctx.topic, get_llm().name)
+    # The model is part of the input: switching to a stronger one should
+    # produce fresh titles rather than replaying the cached weaker set.
+    settings = get_settings()
+    return content_hash(
+        "titles", ctx.topic, get_llm(settings.titles_model).name, settings.titles_model
+    )
 
 
 # --- Stage: script -----------------------------------------------------

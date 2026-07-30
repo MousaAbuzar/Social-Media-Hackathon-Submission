@@ -52,19 +52,35 @@ CLARITY
 - One clear idea. Do not join two claims with a dash or a colon-plus-clause.
 - Concrete beats vague: a number, a named thing, or a specific consequence.
 
-THE CLICK
-A title that is merely accurate gets scrolled past. Each one needs a reason to
-stop:
-- Open a gap. State enough that the viewer knows what they are getting, and
-  leave one thing unresolved that only watching settles. "The Moon Is Drifting
-  Away and Days Are Getting Longer" works because the link is not obvious.
-- Raise a stake the viewer already cares about, or overturn something they
-  believe. A title that confirms what they know has nothing to offer them.
-- Specific beats big. "3.8 cm a year" outperforms "an astonishing rate",
-  because a real number reads as a real explanation.
-- Use strong plain verbs. Prefer the verb to the noun phrase: "Why the Moon
-  Is Drifting Away" over "The Recession of the Lunar Orbit".
-- Assume a thumbnail sits beside it. The title should add a second idea, not
+THE CLICK — the part most titles fail
+A title that is merely accurate gets scrolled past. Accuracy is the floor, not
+the job. The job is to create a specific unanswered question in the viewer's
+head that only the video closes.
+
+The test every title must pass: after reading it, can the viewer walk away
+feeling they already got the point? If yes, the title is dead — rewrite it.
+"The Moon Is Drifting Away From Earth" fails, because that IS the fact. "The
+Moon Is Drifting Away and Days Are Getting Longer" passes, because now there
+is a connection the viewer cannot resolve on their own.
+
+Ways to open that gap — vary them across the five:
+- Name the effect, withhold the mechanism. The viewer gets a real, checkable
+  claim and still needs the how.
+- Take something the viewer is sure about and put it in doubt. Their own
+  belief becomes the thing at stake.
+- Put a specific number next to something it should not fit with. Precision
+  reads as a real explanation waiting behind it; vagueness reads as filler.
+  "3.8 cm a year" beats "an astonishing rate", every time.
+- Ask the question the viewer has genuinely wondered and never looked up —
+  in their words, not the textbook's.
+- Make the consequence personal. Something enormous and distant that reaches
+  into their own day is a stronger pull than the enormous thing alone.
+
+And the mechanics that carry it:
+- Strong plain verbs. Prefer the verb to the noun phrase: "Why the Moon Is
+  Drifting Away" over "The Recession of the Lunar Orbit".
+- The tension belongs in the first half, before mobile truncates it.
+- Assume a thumbnail sits beside it. The title adds a second idea; it does not
   caption the picture.
 
 HONESTY
@@ -74,8 +90,20 @@ HONESTY
 - No ALL-CAPS words, no more than one punctuation mark, no emoji, no
   clickbait brackets like [SHOCKING].
 
-Before you answer, check every candidate against the rules and rewrite any
-that fail. A title that breaks a rule is not a candidate, even a good one.
+Before you answer, run every candidate through three checks and rewrite any
+that fail. A title that fails is not a candidate, however nice it sounds.
+
+1. THE GAP. Does it leave a specific question the viewer cannot answer from
+   the title alone? A title that states its own conclusion has nothing left
+   to offer. This is the check that kills the most titles — apply it hardest.
+2. THE PROMISE. Would a script on this topic actually deliver what the title
+   implies? If not, it is bait, and it goes.
+3. THE RULES. Length, front-loaded subject, real search terms, one clear
+   idea, no caps, one punctuation mark at most, no emoji, no brackets.
+
+Your first instincts will be the safe, descriptive versions of this topic.
+Those are the ones to rewrite. Push each candidate one step past the obvious
+statement of the subject before you commit to it.
 
 Output only the JSON object."""
 

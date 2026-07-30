@@ -5,6 +5,7 @@ from app.providers.base import LLMResult, LLMUsage
 
 # USD per million tokens, in micros. Update alongside the model.
 PRICING_MICROS_PER_MTOK = {
+    "claude-fable-5": (10_000_000, 50_000_000),
     "claude-opus-5": (5_000_000, 25_000_000),
     "claude-sonnet-5": (3_000_000, 15_000_000),
     "claude-haiku-4-5": (1_000_000, 5_000_000),

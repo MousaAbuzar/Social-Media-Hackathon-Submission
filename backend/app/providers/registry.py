@@ -16,11 +16,13 @@ from app.providers.tts_local import LocalTTS
 
 
 @lru_cache
-def get_llm() -> LLMProvider:
+def get_llm(model: str | None = None) -> LLMProvider:
+    """The LLM for a stage. `model` overrides the default for stages that want
+    a stronger (and pricier) model than the rest of the pipeline."""
     settings = get_settings()
     if not settings.anthropic_api_key:
         return FakeLLM()
-    return AnthropicLLM()
+    return AnthropicLLM(model=model)
 
 
 @lru_cache

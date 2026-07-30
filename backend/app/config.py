@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     # LLM
     anthropic_api_key: str = ""
     llm_model: str = "claude-opus-5"
+    # Titles get the strongest model available. Five titles is a ~2k-token call,
+    # so the premium is cents; the script is the one that would actually cost
+    # something, and it stays on llm_model.
+    titles_model: str = "claude-fable-5"
 
     # TTS
     tts_provider: str = "fake"

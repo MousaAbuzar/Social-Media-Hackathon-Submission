@@ -35,7 +35,16 @@ def test_titles_system_asks_for_a_comparative_case_for_the_pick():
 
 @pytest.mark.parametrize(
     "rule",
-    ["Aim for 45-60 characters", "Front-load the subject", "Open a gap", "Specific beats big"],
+    [
+        "Aim for 45-60 characters",
+        "Front-load the subject",
+        # The curiosity gap and its self-check are what separate a title that
+        # gets clicked from one that is merely correct. Losing either in an
+        # edit is the failure this test exists to catch.
+        "THE CLICK",
+        "THE GAP",
+        "can the viewer walk away",
+    ],
 )
 def test_titles_system_keeps_its_best_practice_rules(rule):
     assert rule in prompts.TITLES_SYSTEM
