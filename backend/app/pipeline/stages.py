@@ -51,6 +51,12 @@ class StageContext:
     target_minutes: int | None = None
 
 
+# The prompt caps titles at 70 characters. Anything materially longer is not a
+# title the model wrote — it's a fragment of a malformed reply — so it never
+# reaches the user as one.
+MAX_TITLE_CHARS = 100
+
+
 def _clean_title(line: str) -> str:
     """Strip the list scaffolding models add even when told not to."""
     text = line.strip().lstrip("-*•").strip()
@@ -97,7 +103,7 @@ def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None, st
             if not isinstance(entry, dict):
                 continue
             title = _clean_title(str(entry.get("title", "")))
-            if len(title) > 5:
+            if 5 < len(title) <= MAX_TITLE_CHARS:
                 candidates.append({"title": title, "why": str(entry.get("why", "")).strip()})
         raw = payload.get("recommended")
         if isinstance(raw, str):
@@ -106,11 +112,15 @@ def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None, st
         if isinstance(raw_why, str):
             recommended_why = raw_why.strip()
 
-    if not candidates:
+    # Only fall back to one-title-per-line when the reply was never JSON. A
+    # reply that opens like JSON and failed to parse is truncated or malformed,
+    # and its lines are fragments — feeding those through would surface a
+    # partial JSON blob to the user as though it were a title.
+    if not candidates and not _strip_fence(text).lstrip().startswith(("{", "[")):
         candidates = [
             {"title": t, "why": ""}
             for t in (_clean_title(line) for line in text.splitlines() if line.strip())
-            if len(t) > 5
+            if 5 < len(t) <= MAX_TITLE_CHARS
         ]
 
     candidates = candidates[:count]
@@ -144,7 +154,11 @@ def stage_titles(ctx: StageContext) -> StageResult:
     result = llm.complete(
         system=system,
         prompt=prompts.TITLES_PROMPT.format(topic=ctx.topic),
-        max_tokens=2000,
+        # Reasoning tokens count against this ceiling too, and the titles
+        # prompt asks for real deliberation before it commits. The JSON itself
+        # is ~700 tokens; the rest is headroom so a topic that needs more
+        # thinking doesn't come back truncated mid-string.
+        max_tokens=8000,
     )
 
     candidates, recommended, recommended_why = _parse_candidates(

@@ -46,6 +46,17 @@ class AnthropicLLM:
             detail = getattr(message.stop_details, "category", None) or "unspecified"
             raise RuntimeError(f"Model declined the request ({detail})")
 
+        # A response cut off at the ceiling is never usable: JSON stops
+        # mid-string, a script stops mid-sentence. Callers used to receive the
+        # fragment and quietly treat it as a complete answer, so fail here
+        # instead. Note the ceiling covers reasoning tokens as well as visible
+        # output, which is what makes a seemingly generous limit run out.
+        if message.stop_reason == "max_tokens":
+            raise RuntimeError(
+                f"Model hit the {max_tokens}-token ceiling and was cut off "
+                "mid-response. Raise max_tokens for this stage."
+            )
+
         text = "".join(block.text for block in message.content if block.type == "text")
         return LLMResult(
             text=text.strip(),

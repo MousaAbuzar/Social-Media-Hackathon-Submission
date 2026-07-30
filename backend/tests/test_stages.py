@@ -4,6 +4,8 @@ These run entirely offline against the fake providers, so the full pipeline
 is exercised on every commit without an API key or a cent of spend.
 """
 
+import json
+
 import pytest
 
 from app.models import StageName
@@ -79,6 +81,34 @@ def test_titles_keep_the_comparison_when_the_recommendation_stands():
     )
     assert recommended == "How Black Holes Bend Time"
     assert recommended_why == "It beats the rest on search volume."
+
+
+def test_truncated_json_does_not_become_one_giant_title():
+    """The regression: a reply cut off at max_tokens fell through to the
+    line-based fallback, and the user saw 2000 characters of partial JSON
+    presented as a single title."""
+    truncated = (
+        '{"candidates": [{"title": "How Rome Went From a Village to an Empire", '
+        '"why": "It names the span and withholds the mechanism, which is the'
+    )
+    candidates, recommended, _ = stages._parse_candidates(truncated, count=5)
+    assert candidates == []
+    assert recommended is None
+
+
+def test_an_overlong_title_is_dropped_rather_than_shown():
+    candidates, _, _ = stages._parse_candidates(
+        json.dumps(
+            {
+                "candidates": [
+                    {"title": "x" * 400, "why": "runaway"},
+                    {"title": "How Black Holes Bend Time", "why": "fine"},
+                ]
+            }
+        ),
+        count=5,
+    )
+    assert [c["title"] for c in candidates] == ["How Black Holes Bend Time"]
 
 
 def test_titles_survive_a_markdown_fence():
