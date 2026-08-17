@@ -10,7 +10,7 @@
 
 [![Watch on YouTube](https://img.shields.io/badge/📺%20Scripts%20from%20this%20pipeline%20are%20live-1%2C000%2B%20views-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/@mousaabuzar125)
 
-### 📺 Not a demo — this pipeline writes and narrates the videos on [**@mousaabuzar125**](https://www.youtube.com/@mousaabuzar125), which has passed **1,000+ views**.
+### 📺 Not a demo — this pipeline writes and narrates the videos on **Cosmic Quests** ([**@mousaabuzar125**](https://www.youtube.com/@mousaabuzar125)), which has passed **1,000+ views**.
 
 <br>
 
@@ -51,7 +51,7 @@ upload metadata. Nothing hand-edited.
 
 ## 🚀 This isn't a demo. It's in production.
 
-ScriptCast is **the actual production pipeline behind a live, long-form educational science channel** — [**@mousaabuzar125**](https://www.youtube.com/@mousaabuzar125), where the uploads actually land. Every video published there starts as a single line typed into this UI and ends as a `.wav` file and a metadata bundle rendered by this pipeline, on a laptop, in the next room.
+ScriptCast is **the actual production pipeline behind a real, live YouTube channel — [Cosmic Quests](https://www.youtube.com/@mousaabuzar125)** — a long-form educational science channel. Every video published there starts as a single line typed into this UI and ends as a `.wav` file and a metadata bundle rendered by this pipeline, on a laptop, in the next room.
 
 Videos scripted and narrated by this pipeline have **generated over 1,000 views on the channel** — real output, in front of a real audience, not a demo reel.
 
