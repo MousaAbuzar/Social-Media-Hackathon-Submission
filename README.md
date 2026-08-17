@@ -4,7 +4,7 @@
 
 ### A topic goes in. A finished, narrated, upload-ready video script comes out.
 
-**ScriptCast is a durable, fault-tolerant content pipeline that turns a one-line idea into a researched narration script, a cloned-voice audio track, and a publish-ready metadata bundle — running entirely on one machine, for $0.00 a run.**
+**ScriptCast is a durable, fault-tolerant content pipeline that turns a one-line idea into a researched narration script, a cloned-voice audio track, and a publish-ready metadata bundle — running entirely on one machine, for $0.00 a run (for the Audio generation part).**
 
 <br>
 
