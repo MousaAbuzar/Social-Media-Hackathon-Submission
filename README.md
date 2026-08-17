@@ -20,7 +20,25 @@
 [![Runs offline](https://img.shields.io/badge/runs-fully%20offline-8A2BE2?style=flat-square)](#-no-key-no-network-no-spend)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](#)
 
+**[▶️ Watch a run](#-watch-it-run)** · **[📂 See the output of a real run](examples/)**
+
 </div>
+
+---
+
+## 🎬 Watch it run
+
+<!-- TODO: drag your recording into a GitHub issue comment, copy the URL it
+     generates, and paste it below to replace this block. -->
+
+> *Recording coming — drop the video here.*
+
+**Topic in → titles → script → narration, in about four minutes.**
+
+Prefer to read the output instead? Every file from that exact run is committed
+in **[`examples/`](examples/)** — the five title candidates with the argument
+for each, the researched script, the QA findings, the finished audio, and the
+upload metadata. Nothing hand-edited.
 
 ---
 

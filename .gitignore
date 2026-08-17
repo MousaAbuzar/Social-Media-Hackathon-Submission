@@ -12,9 +12,11 @@ dist/
 *.log
 .DS_Store
 
-# Machine-specific voice list: names audio samples that live on your own
-# TTS server, not in this repo. Ship voices.local.example.json instead.
+# Machine-specific voice lists: they name vendor voice ids and audio samples
+# tied to one account or one TTS server, not to this repo. Ship the
+# .example.json files instead.
 backend/app/providers/voices.local.json
+backend/app/providers/voices.json
 
 # local venv
 backend/.venv/
