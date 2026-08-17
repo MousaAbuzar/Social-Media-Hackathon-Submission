@@ -8,6 +8,12 @@
 
 <br>
 
+[![Watch on YouTube](https://img.shields.io/badge/📺%20Scripts%20from%20this%20pipeline%20are%20live-1%2C000%2B%20views-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/@mousaabuzar125)
+
+### 📺 Not a demo — this pipeline writes and narrates the videos on [**@mousaabuzar125**](https://www.youtube.com/@mousaabuzar125), which has passed **1,000+ views**.
+
+<br>
+
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Celery](https://img.shields.io/badge/Celery-workers-37814A?style=for-the-badge&logo=celery&logoColor=white)](https://docs.celeryq.dev)
@@ -19,8 +25,9 @@
 [![Voice cost](https://img.shields.io/badge/voice-%240.00%20per%20run%20(self--hosted)-blue?style=flat-square)](#-the-zero-cost-voice)
 [![Runs offline](https://img.shields.io/badge/runs-fully%20offline-8A2BE2?style=flat-square)](#-no-key-no-network-no-spend)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](#)
+[![Views](https://img.shields.io/badge/YouTube-1%2C000%2B%20views%20from%20pipeline%20output-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://www.youtube.com/@mousaabuzar125)
 
-**[▶️ Watch a run](#-watch-it-run)** · **[📂 See the output of a real run](examples/)**
+**[▶️ Watch a run](#-watch-it-run)** · **[📂 See the output of a real run](examples/)** · **[📺 The channel it publishes to](https://www.youtube.com/@mousaabuzar125)**
 
 </div>
 
@@ -44,7 +51,9 @@ upload metadata. Nothing hand-edited.
 
 ## 🚀 This isn't a demo. It's in production.
 
-ScriptCast is **the actual production pipeline behind a live, long-form educational science channel.** Every video published there starts as a single line typed into this UI and ends as a `.wav` file and a metadata bundle rendered by this pipeline, on a laptop, in the next room.
+ScriptCast is **the actual production pipeline behind a live, long-form educational science channel** — [**@mousaabuzar125**](https://www.youtube.com/@mousaabuzar125), where the uploads actually land. Every video published there starts as a single line typed into this UI and ends as a `.wav` file and a metadata bundle rendered by this pipeline, on a laptop, in the next room.
+
+Videos scripted and narrated by this pipeline have **generated over 1,000 views on the channel** — real output, in front of a real audience, not a demo reel.
 
 That constraint shaped every design decision in this repo:
 
@@ -340,7 +349,7 @@ Scope discipline is a feature. These are absent on purpose:
 
 <div align="center">
 
-**Built for a hackathon. Already shipping videos.**
+**Built for a hackathon. Already shipping videos — and 1,000+ views.**
 
 <sub>Topic in. Narrated audio out. The interesting part was never the API calls — it was the orchestration around them.</sub>
 
