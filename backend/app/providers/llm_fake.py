@@ -32,7 +32,18 @@ class FakeLLM:
     def __init__(self, model: str = "fake-1") -> None:
         self.model = model
 
-    def complete(self, *, system: str, prompt: str, max_tokens: int) -> LLMResult:
+    def complete(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int,
+        web_search: bool = False,
+        budget_micros: int | None = None,
+    ) -> LLMResult:
+        # `web_search` and `budget_micros` are accepted and ignored: offline is
+        # the whole point of this provider. There is nothing to ground against
+        # and nothing to spend, so no budget can be crossed.
         seed = hashlib.sha256((system + prompt).encode()).hexdigest()[:8]
 
         if "TITLES" in system:

@@ -79,6 +79,14 @@ export interface RunSummary {
   created_at: string;
 }
 
+/** How fast synthesis runs on this machine, for the progress countdown. */
+export interface TtsRate {
+  chars_per_second: number;
+  /** "measured" once a real synthesis has finished here, "default" before. */
+  source: "measured" | "default";
+  samples: number;
+}
+
 export interface Voice {
   id: string;
   label: string;
@@ -105,6 +113,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   settings: () => request<ScriptLengthSettings>("/settings"),
   voices: () => request<Voice[]>("/voices"),
+  ttsRate: () => request<TtsRate>("/tts/rate"),
   listRuns: () => request<RunSummary[]>("/runs"),
   getRun: (id: string) => request<Run>(`/runs/${id}`),
   createRun: (topic: string) =>
@@ -124,6 +133,22 @@ export const api = {
     request<{ url: string; content_type: string }>(
       `/runs/${runId}/artifacts/${artifactId}/url`,
     ),
+  /**
+   * The artifact's bytes, served by the API rather than by object storage.
+   *
+   * The presigned URL above points the browser at storage on its own port,
+   * which turned out to answer intermittent 503s that cost the download
+   * outright. This path is the same origin the rest of the app already talks
+   * to successfully, so the save no longer depends on that second hop.
+   */
+  artifactBlob: async (runId: string, artifactId: string): Promise<Blob> => {
+    const response = await fetch(
+      `${API_URL}/api/runs/${runId}/artifacts/${artifactId}/download`,
+      { headers: { Authorization: `Bearer ${APP_TOKEN}` } },
+    );
+    if (!response.ok) throw new Error(`download failed: ${response.status}`);
+    return response.blob();
+  },
 };
 
 export function formatCost(micros: number): string {

@@ -109,16 +109,41 @@ docker compose up -d --force-recreate api worker
 The new voice shows up in the UI's voice list. Cost per run reads `$0.00`,
 which is now literally true.
 
-## Tuning
+## Voice character
 
-Optional knobs in `.env`, applied per request:
+Every request sends these explicitly. The server has its own editable defaults
+for each, and sending ours means a change made in its web UI cannot quietly
+restyle a ScriptCast run. Override per machine in `.env`.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `TTS_LOCAL_EXAGGERATION` | 0.5 | Higher = more theatrical delivery |
-| `TTS_LOCAL_TEMPERATURE` | 0.8 | Lower = steadier, more repeatable |
+| `TTS_LOCAL_TEMPERATURE` | 0.6 | Lower = steadier, more repeatable |
+| `TTS_LOCAL_EXAGGERATION` | 0.85 | Higher = more theatrical delivery |
 | `TTS_LOCAL_CFG_WEIGHT` | 0.5 | Higher = closer to the reference clip |
+| `TTS_LOCAL_SPEED_FACTOR` | 1.0 | 1.0 leaves pace untouched |
 | `TTS_LOCAL_CHUNK_SIZE` | 300 | Characters per chunk before stitching |
+
+The first two are deliberately off the server's stock 0.8/0.5: steadier, so
+delivery does not drift between the chunks of a long narration, and a lot more
+expressive, so it reads as documentary rather than flat.
+
+Leave `SPEED_FACTOR` at 1.0 unless you have a reason. The server resamples the
+audio after generating it, which costs quality — to change pace, change
+`WORDS_PER_MINUTE`, which makes the model write for the pace instead.
+
+## While it runs
+
+The audio panel counts down instead of just saying "synthesizing". There is no
+percent-done to report — Chatterbox returns nothing until the whole script is
+done — so the bar is projected from the script's length against this machine's
+measured speed, taken from the median of your last few runs (`GET
+/api/tts/rate`). The first run has no history and says so; after that the
+estimate is your own hardware's number. Measured on an RTX 4050: ~5.2
+characters per second, so a 1200-word script lands around 20 minutes.
+
+When the audio is ready the browser saves it automatically, named after the
+title, and the panel confirms with the filename. The link below it re-downloads
+if the browser blocked the automatic save.
 
 ## Notes
 

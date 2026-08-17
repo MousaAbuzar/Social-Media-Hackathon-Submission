@@ -225,6 +225,79 @@ def test_package_carries_synthetic_disclosure(ctx, stub_storage):
     assert result.output["title"]
 
 
+# --- Review is advisory, and must behave like it ------------------------
+
+
+def _script_ctx(ctx, words: int = 4500):
+    """A ctx whose prior script is `words` long, without paying to write one."""
+    ctx.prior[StageName.script.value] = {"script": "word " * words, "word_count": words}
+    return ctx
+
+
+def test_review_token_ceiling_scales_with_the_script(ctx):
+    """The 30-minute-script bug.
+
+    A flat 2,000 covered the findings but not the thinking, so a long script
+    was cut off mid-response and failed a stage that had already been paid for.
+    """
+    short = stages.review_max_tokens("word " * 1200)  # ~8 minutes
+    long = stages.review_max_tokens("word " * 4500)  # ~30 minutes
+    longest = stages.review_max_tokens("word " * 20000)
+
+    assert short >= 8_000, "even a short script needs room to think"
+    assert long > 2_000, "the ceiling that broke a 30-minute script"
+    assert longest > long, "a longer script gets more room"
+    assert longest <= 32_000, "but not unbounded"
+
+
+def test_review_failure_does_not_fail_the_run(ctx, monkeypatch):
+    """An advisory gate that can kill the run is not advisory.
+
+    The script is written and paid for by this point. Losing it to a failed
+    opinion about it is the worse outcome, so the stage steps aside instead.
+    """
+    _script_ctx(ctx)
+
+    def boom(**kwargs):
+        raise RuntimeError("Model hit the 2000-token ceiling and was cut off")
+
+    monkeypatch.setattr(stages.get_llm(), "complete", boom)
+
+    result = stages.stage_review(ctx)
+
+    assert result.output["ran"] is False
+    assert result.output["passed"] is False
+    # Silence must not read as approval — the finding has to say it did not run.
+    assert "could not run" in result.output["findings"]
+    assert "not checked" in result.output["findings"]
+    assert result.cost_micros == 0
+
+
+def test_review_still_stops_the_run_when_the_budget_is_gone(ctx, monkeypatch):
+    """The one failure worth stopping for.
+
+    Carrying on would spend more on synthesis, and the spend that triggered
+    this was never recorded — so the budget guard is already flying blind.
+    """
+    from app.providers.base import BudgetExceeded
+
+    _script_ctx(ctx)
+
+    def broke(**kwargs):
+        raise BudgetExceeded("Run budget exhausted inside a single call")
+
+    monkeypatch.setattr(stages.get_llm(), "complete", broke)
+
+    with pytest.raises(BudgetExceeded):
+        stages.stage_review(ctx)
+
+
+def test_review_marks_a_successful_check_as_having_run(ctx):
+    _script_ctx(ctx)
+    output = stages.stage_review(ctx).output
+    assert output["ran"] is True
+
+
 def test_unknown_voice_is_rejected(ctx):
     from app.providers.registry import resolve_voice
 

@@ -1,0 +1,27 @@
+{
+  "topic": "what is a black hole",
+  "recommended": "Black Holes Don't Pull You In the Way You Think",
+  "recommended_why": "It's the only candidate that opens a gap inside something the viewer already believes, which is a stronger pull than a scenario they've merely wondered about, and at 47 characters with the keyword up front it survives truncation cleanly — which the 9mm title, with 'black hole' in its final two words, does not. Against the definitional 'nothing like an actual hole' it promises a personal correction rather than a vocabulary lesson, and against the Hawking-radiation title it matches the broad scope of the actual video. The runner-up is 'What Would Happen If You Fell Into a Black Hole?' — pick it instead only if search traffic is the priority, since it matches the literal query and this one doesn't.",
+  "candidates": [
+    {
+      "why": "Attacks the one thing every viewer is sure of — that black holes suck things in — so their own belief is the stake, and the correction (gravity works normally until the horizon) is exactly what an explainer delivers. Keyword sits in the first two words and the whole title survives truncation. Weakness: it captures no specific search query, so it leans on browse and suggested traffic rather than search.",
+      "title": "Black Holes Don't Pull You In the Way You Think"
+    },
+    {
+      "why": "This is the question people actually type, nearly verbatim, so it owns the search term and the video's spaghettification-and-time-dilation section pays it off directly. Weakness: the phrasing is common across the genre, so it competes with big established videos, and 'black hole' doesn't land until the end of the line.",
+      "title": "What Would Happen If You Fell Into a Black Hole?"
+    },
+    {
+      "why": "The absurdly specific number next to a planet-sized object is a gap the viewer can't close alone — why 9mm, and what happens at that size? It teaches the Schwarzschild radius without naming it. Weakness: at 60 characters it sits right on the truncation line, and 'black hole' arrives last, exactly where mobile cuts.",
+      "title": "Squeeze Earth Down to 9 Millimeters and You Get a Black Hole"
+    },
+    {
+      "why": "Names the misconception baked into the term itself, which is the natural opening move of any 'what is a black hole' script, and the 'why' framing withholds the answer. Weakness: it's a definitional promise rather than a visceral one, so it reads a bit like a lecture title next to the scenario-based options.",
+      "title": "Why a Black Hole Is Nothing Like an Actual Hole"
+    },
+    {
+      "why": "Puts two impossible-sounding facts together — black holes glow, and they die — and withholds the mechanism (Hawking radiation), which a general explainer can cover honestly. Strong plain verbs and well under 60 characters. Weakness: it fits an evaporation-focused video better than a broad 'what is a black hole' one, so the payoff arrives late in the script.",
+      "title": "Why Black Holes Slowly Glow Themselves to Death"
+    }
+  ]
+}

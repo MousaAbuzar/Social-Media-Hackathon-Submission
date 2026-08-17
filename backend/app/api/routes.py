@@ -1,5 +1,6 @@
 import asyncio
 import json
+import statistics
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import require_token
 from app.config import get_settings
 from app.db import get_session
-from app.models import Artifact, Run, RunStatus, StageName, StageStatus
+from app.models import Artifact, Run, RunStatus, Stage, StageName, StageStatus
 from app.pipeline.runner import create_stage_rows
 from app.providers.registry import get_tts
 from app.schemas import (
@@ -23,14 +24,19 @@ from app.schemas import (
     SelectTitleRequest,
     SelectVoiceRequest,
     StageOut,
+    TtsRateOut,
     VoiceOut,
 )
-from app.storage import presigned_url
+from app.storage import iter_object, object_size, presigned_url
 from app.worker import advance_run
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
 RUN_LOADERS = (selectinload(Run.stages), selectinload(Run.artifacts))
+
+# The event stream's own polling loop: 45 minutes at 2s.
+POLL_SECONDS = 2
+POLL_ITERATIONS = 1350
 
 
 async def _load_run(session: AsyncSession, run_id: uuid.UUID) -> Run:
@@ -53,6 +59,70 @@ async def script_length_settings() -> ScriptLengthOut:
         min_minutes=s.min_script_minutes,
         max_minutes=s.max_script_minutes,
         words_per_minute=s.words_per_minute,
+    )
+
+
+# Enough past runs to smooth out a warm-up outlier, few enough that the number
+# still tracks the machine's current state (a driver change, a different voice).
+RATE_SAMPLE_LIMIT = 10
+# Scanned before filtering, since the provider a stage ran on is inside its
+# JSON output rather than a column. Switching providers otherwise leaves the
+# estimate stuck on "default" until the old stages scroll out of the window.
+RATE_SCAN_LIMIT = 100
+
+
+@router.get("/tts/rate", response_model=TtsRateOut)
+async def tts_rate(session: AsyncSession = Depends(get_session)) -> TtsRateOut:
+    """Synthesis speed in characters per second, measured from past runs.
+
+    The UI turns this into a countdown. Self-hosted synthesis speed depends on
+    the machine, not on us, so a configured constant would be wrong everywhere
+    except where it was measured — the median of what actually happened here is
+    the only honest source.
+    """
+    stages = (
+        await session.scalars(
+            select(Stage)
+            .where(
+                Stage.name == StageName.tts,
+                Stage.status == StageStatus.completed,
+                Stage.started_at.is_not(None),
+                Stage.finished_at.is_not(None),
+            )
+            .order_by(Stage.finished_at.desc())
+            .limit(RATE_SCAN_LIMIT)
+        )
+    ).all()
+
+    provider = get_tts().name
+    rates: list[float] = []
+    for stage in stages:
+        if len(rates) >= RATE_SAMPLE_LIMIT:
+            break
+        output = stage.output or {}
+        # Only this provider's history predicts this provider's speed. The fake
+        # provider in particular returns instantly, and one of its runs left in
+        # the mix would promise an ETA of seconds for work that takes minutes.
+        if output.get("provider") != provider:
+            continue
+        characters = output.get("characters") or 0
+        seconds = (stage.finished_at - stage.started_at).total_seconds()
+        # A stage that replayed from the content cache finished in about no
+        # time and never touched the TTS server. Its "rate" is an artifact of
+        # caching, and averaging it in would promise an impossible ETA.
+        if characters > 0 and seconds >= 1:
+            rates.append(characters / seconds)
+
+    if not rates:
+        return TtsRateOut(
+            chars_per_second=get_settings().tts_chars_per_second,
+            source="default",
+            samples=0,
+        )
+    return TtsRateOut(
+        chars_per_second=round(statistics.median(rates), 2),
+        source="measured",
+        samples=len(rates),
     )
 
 
@@ -175,8 +245,38 @@ async def artifact_url(
     )
     if artifact is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
-    # Presigned so the browser downloads straight from object storage.
+    # Presigned so the browser downloads straight from object storage. Kept for
+    # the audio player, which streams and wants range requests; the download
+    # goes through /download instead, where it cannot be lost to a storage blip.
     return {"url": presigned_url(artifact.s3_key), "content_type": artifact.content_type}
+
+
+@router.get("/runs/{run_id}/artifacts/{artifact_id}/download")
+async def artifact_download(
+    run_id: uuid.UUID, artifact_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+) -> StreamingResponse:
+    """Serve the artifact bytes through the API.
+
+    Same origin as every other call the UI makes, so the download inherits the
+    auth and CORS setup that already works rather than depending on the browser
+    reaching object storage on a second port.
+    """
+    artifact = await session.scalar(
+        select(Artifact).where(Artifact.id == artifact_id, Artifact.run_id == run_id)
+    )
+    if artifact is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found")
+
+    return StreamingResponse(
+        iter_object(artifact.s3_key),
+        media_type=artifact.content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{artifact.kind}"',
+            # Set explicitly: a streamed response is chunked by default, and
+            # without a length the browser cannot show download progress.
+            "Content-Length": str(await asyncio.to_thread(object_size, artifact.s3_key)),
+        },
+    )
 
 
 @router.get("/runs/{run_id}/events")
@@ -192,7 +292,11 @@ async def run_events(run_id: uuid.UUID) -> StreamingResponse:
         from app.db import AsyncSessionLocal
 
         last_payload = None
-        for _ in range(600):  # ~20 minutes at 2s
+        # Must outlast the slowest stage, or the stream expires mid-run and the
+        # page has nothing left telling it the run finished. Self-hosted TTS is
+        # the long pole and its own timeout is 30 minutes, so this covers that
+        # with headroom. The client polls as a backstop either way.
+        for _ in range(POLL_ITERATIONS):
             async with AsyncSessionLocal() as session:
                 run = await session.scalar(
                     select(Run).options(*RUN_LOADERS).where(Run.id == run_id)
@@ -227,7 +331,7 @@ async def run_events(run_id: uuid.UUID) -> StreamingResponse:
                 last_payload = payload
             if terminal:
                 return
-            await asyncio.sleep(2)
+            await asyncio.sleep(POLL_SECONDS)
 
     return StreamingResponse(
         stream(),

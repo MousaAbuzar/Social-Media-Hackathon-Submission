@@ -192,6 +192,73 @@ audio {
   gap: 8px;
 }
 
+/* Synthesis has no server-side percent-done, so this bar is projected from a
+   measured rate. Deliberately plain: it should not look more precise than it
+   is. */
+.progress {
+  width: 100%;
+  height: 8px;
+  background: #0d1017;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 4px 0 12px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 1s linear;
+}
+
+.done {
+  margin: 12px 0 0;
+  color: #7ee2a8;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.voices {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-option {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  background: #0d1017;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 13px 15px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.voice-option:hover {
+  border-color: var(--accent);
+}
+
+.voice-option.selected {
+  border-color: var(--accent);
+  background: rgba(91, 140, 255, 0.1);
+}
+
+.voice-desc {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .title-option {
   width: 100%;
   display: flex;

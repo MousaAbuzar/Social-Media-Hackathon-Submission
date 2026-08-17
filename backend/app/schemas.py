@@ -94,6 +94,16 @@ class ScriptLengthOut(BaseModel):
     words_per_minute: int
 
 
+class TtsRateOut(BaseModel):
+    """How fast synthesis runs here, so the UI can show a countdown."""
+
+    chars_per_second: float
+    # "measured" once this machine has finished a synthesis, "default" before.
+    # Surfaced so the UI can hedge the first estimate rather than state it flatly.
+    source: str
+    samples: int
+
+
 class VoiceOut(BaseModel):
     id: str
     label: str

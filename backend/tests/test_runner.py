@@ -190,3 +190,108 @@ def test_cost_accumulates_across_stages(session, run):
     assert run.input_tokens > 0
     assert run.output_tokens > 0
     assert run.tts_characters > 0
+
+
+# --- Budget cap ---------------------------------------------------------
+#
+# The fakes are free, so these drive the guard directly: a stage ceiling that
+# exceeds what is left, or a run that has already overspent. That keeps the
+# tests about the enforcement rather than about any provider's price list.
+
+
+def _charge_titles(monkeypatch, micros: int) -> None:
+    """Make the titles stage claim it could cost `micros`."""
+    from app.pipeline.stages import STAGE_COST_CEILINGS
+
+    monkeypatch.setitem(STAGE_COST_CEILINGS, StageName.titles, lambda ctx: micros)
+
+
+def test_stage_that_cannot_be_afforded_never_runs(session, run, monkeypatch):
+    from app.config import get_settings
+
+    budget = get_settings().run_budget_micros
+    _charge_titles(monkeypatch, budget + 1)
+
+    assert advance(session, run.id) is False
+    session.refresh(run)
+
+    assert run.status is RunStatus.failed
+    # The point of a preflight check: the call was never made, so nothing was
+    # spent finding out it was unaffordable.
+    assert run.cost_micros == 0
+    titles = next(s for s in run.stages if s.name is StageName.titles)
+    assert titles.status is StageStatus.failed
+    assert titles.attempt == 0
+    assert "run budget" in run.error
+
+
+def test_budget_failure_names_the_numbers(session, run, monkeypatch):
+    _charge_titles(monkeypatch, 9_990_000)
+
+    advance(session, run.id)
+    session.refresh(run)
+
+    # A halt the user cannot act on is a halt they will just retry. The message
+    # has to say what it would have cost and what was left.
+    assert "$9.99" in run.error
+    assert "RUN_BUDGET_USD" in run.error
+
+
+def test_budget_failure_is_not_retried_into_more_spend(session, run, monkeypatch):
+    _charge_titles(monkeypatch, 9_990_000)
+
+    advance(session, run.id)
+    session.refresh(run)
+    assert run.status is RunStatus.failed
+
+    # Retrying spends more of exactly what ran out, so a re-advance must stay
+    # halted rather than quietly attempting the stage again.
+    assert advance(session, run.id) is False
+    session.refresh(run)
+    assert run.status is RunStatus.failed
+    assert run.cost_micros == 0
+
+
+def test_a_run_already_over_budget_halts_before_the_next_stage(session, run, monkeypatch):
+    from app.config import get_settings
+
+    # Pretend the first stage overspent, the case the post-stage backstop
+    # exists for, then confirm the next stage refuses to start.
+    drain(session, run.id)
+    session.refresh(run)
+    run.cost_micros = get_settings().run_budget_micros + 1
+    run.chosen_title = "How Neutron Stars Are Born"
+    run.status = RunStatus.pending
+    session.commit()
+
+    _charge_titles(monkeypatch, 0)
+    assert advance(session, run.id) is False
+    session.refresh(run)
+
+    assert run.status is RunStatus.failed
+    script = next(s for s in run.stages if s.name is StageName.script)
+    assert script.status is StageStatus.failed
+
+
+def test_cached_stages_still_replay_when_the_budget_is_gone(session, run):
+    """A cache hit costs nothing, so an exhausted budget must not block it.
+
+    Otherwise a run that overspent could never be inspected or resumed — every
+    advance would halt on work that was already paid for.
+    """
+    from app.config import get_settings
+
+    advance(session, run.id)  # titles, for real
+    session.refresh(run)
+
+    titles = next(s for s in run.stages if s.name is StageName.titles)
+    original = titles.output
+    titles.status = StageStatus.pending
+    run.cost_micros = get_settings().run_budget_micros
+    session.commit()
+
+    advance(session, run.id)
+    session.refresh(titles)
+
+    assert titles.status is StageStatus.completed
+    assert titles.output == original

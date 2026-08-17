@@ -59,6 +59,35 @@ def put_object(key: str, data: bytes, content_type: str) -> int:
     return len(data)
 
 
+CHUNK_BYTES = 256 * 1024
+
+
+def iter_object(key: str):
+    """Stream an object back through the internal endpoint, in chunks.
+
+    Used to serve downloads from the API instead of pointing the browser at
+    storage directly. Presigned URLs are the cheaper path in principle, but
+    they put the browser on a second origin with its own CORS rules, its own
+    expiry, and its own failure modes.
+
+    Chunked rather than read whole: narration WAVs run to tens of megabytes,
+    and buffering one entirely per request costs that much API memory for as
+    long as the transfer takes.
+    """
+    settings = get_settings()
+    body = _client().get_object(Bucket=settings.s3_bucket, Key=key)["Body"]
+    try:
+        while chunk := body.read(CHUNK_BYTES):
+            yield chunk
+    finally:
+        body.close()
+
+
+def object_size(key: str) -> int:
+    settings = get_settings()
+    return _client().head_object(Bucket=settings.s3_bucket, Key=key)["ContentLength"]
+
+
 def presigned_url(key: str, expires_seconds: int = 3600) -> str:
     settings = get_settings()
     return _public_client().generate_presigned_url(

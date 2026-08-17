@@ -13,6 +13,7 @@ import {
   type ScriptLengthSettings,
   type Stage,
   type TitleCandidate,
+  type TtsRate,
   type Voice,
 } from "@/lib/api";
 
@@ -50,8 +51,134 @@ async function streamRun(
   }
 }
 
-function AudioPlayer({ runId, artifact }: { runId: string; artifact: Artifact }) {
+// Tries at 0s, 1s, 2s, 4s. Long enough to ride out a storage restart, short
+// enough that a genuinely broken download still reports quickly.
+const DOWNLOAD_ATTEMPTS = 4;
+
+/** "8:24" for a countdown, "about 14 min" for an estimate. */
+function formatDuration(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  const mins = Math.floor(whole / 60);
+  return `${mins}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+/** Filesystem-safe stem for the saved file, so downloads are identifiable
+ *  later without opening them. */
+function downloadName(title: string, contentType: string): string {
+  const stem =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "scriptcast-audio";
+  return `${stem}.${contentType.includes("wav") ? "wav" : "mp3"}`;
+}
+
+/**
+ * Synthesis progress with a live countdown.
+ *
+ * The server cannot report percent-done — Chatterbox streams nothing back
+ * until the whole script is synthesized — so the bar is projected from this
+ * machine's measured characters-per-second against the script's length. It is
+ * an estimate and says so; the point is telling a 20-minute wait apart from a
+ * hung one.
+ */
+function SynthesisProgress({
+  startedAt,
+  characters,
+}: {
+  startedAt: string | null;
+  characters: number;
+}) {
+  const [rate, setRate] = useState<TtsRate | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    api
+      .ttsRate()
+      .then(setRate)
+      .catch(() => setRate(null));
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!rate || !startedAt || characters <= 0) {
+    return (
+      <p className="hint">
+        Synthesizing… this can take several minutes for a full-length script.
+      </p>
+    );
+  }
+
+  const total = characters / rate.chars_per_second;
+  const elapsed = (now - new Date(startedAt).getTime()) / 1000;
+  const remaining = total - elapsed;
+  // Never let the bar sit at 100% while the work continues — that reads as
+  // stuck. It creeps the last stretch instead and the text carries the truth.
+  const percent = Math.min(99, Math.max(0, (elapsed / total) * 100));
+
+  return (
+    <>
+      <div
+        className="progress"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(percent)}
+      >
+        <div className="progress-fill" style={{ width: `${percent}%` }} />
+      </div>
+      <p className="hint">
+        {remaining > 0 ? (
+          <>
+            <strong>About {formatDuration(remaining)} left</strong> — {formatDuration(elapsed)}{" "}
+            elapsed of an estimated {formatDuration(total)}.
+          </>
+        ) : (
+          <>
+            <strong>Any moment now</strong> — running longer than the {formatDuration(total)}{" "}
+            estimate ({formatDuration(elapsed)} elapsed).
+          </>
+        )}{" "}
+        {rate.source === "measured"
+          ? `Estimated from your last ${rate.samples} ${
+              rate.samples === 1 ? "run" : "runs"
+            } at ${rate.chars_per_second} characters/sec.`
+          : "First run on this machine, so this is a rough guess — the next estimate uses your real speed."}
+      </p>
+    </>
+  );
+}
+
+/**
+ * Plays the finished audio and saves it to disk without being asked.
+ *
+ * The download fires automatically because the user's ask ends at having the
+ * file, not at being offered it — and after a wait this long, coming back to a
+ * page that still needs one more click is the annoying case. The link stays
+ * for a second copy or if the browser blocks the automatic save.
+ */
+function AudioPlayer({
+  runId,
+  artifact,
+  title,
+}: {
+  runId: string;
+  artifact: Artifact;
+  title: string;
+}) {
   const [url, setUrl] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Bumped to ask for another attempt after a failure.
+  const [attempt, setAttempt] = useState(0);
+  // Guards against a re-render saving the same file twice. Cleared on failure,
+  // so a retry is allowed but a success is still final.
+  const savedFor = useRef<string | null>(null);
+  const filename = downloadName(title, artifact.content_type);
 
   useEffect(() => {
     api
@@ -60,15 +187,83 @@ function AudioPlayer({ runId, artifact }: { runId: string; artifact: Artifact })
       .catch(() => setUrl(null));
   }, [runId, artifact.id]);
 
-  if (!url) return <p className="hint">Preparing download link…</p>;
+  useEffect(() => {
+    if (savedFor.current === artifact.id) return;
+    savedFor.current = artifact.id;
+
+    let objectUrl: string | null = null;
+    let canceled = false;
+
+    (async () => {
+      // Retried because a lost download costs the user the twenty minutes they
+      // just spent waiting, while a retry costs a second. Going through the API
+      // removed the flaky hop that made this necessary; the retry stays because
+      // the cost asymmetry has not changed.
+      let lastError: unknown = null;
+      for (let tries = 0; tries < DOWNLOAD_ATTEMPTS; tries++) {
+        if (tries > 0) await new Promise((r) => setTimeout(r, 1000 * 2 ** (tries - 1)));
+        if (canceled) return;
+        try {
+          objectUrl = URL.createObjectURL(await api.artifactBlob(runId, artifact.id));
+          if (canceled) return;
+          const link = document.createElement("a");
+          link.href = objectUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setSaved(filename);
+          setSaveError(null);
+          return;
+        } catch (e) {
+          lastError = e;
+        }
+      }
+      // Out of attempts. Release the guard so the retry button can try again.
+      savedFor.current = null;
+      setSaveError(lastError instanceof Error ? lastError.message : String(lastError));
+    })().finally(() => {
+      // Revoked late: revoking before the browser has read the blob cancels
+      // the save in Chrome.
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl!), 60_000);
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [runId, artifact.id, filename, attempt]);
+
   return (
     <>
-      <audio controls src={url} />
-      <p className="hint">
-        <a href={url} download>
-          Download audio ({Math.round(artifact.size_bytes / 1024)} KB)
-        </a>
-      </p>
+      {/* The player still streams from storage directly, where range requests
+          let it seek without pulling the whole file. The download does not. */}
+      {url ? <audio controls src={url} /> : <p className="hint">Loading the player…</p>}
+      {saved && <p className="done">✓ Done — downloaded {saved}. Check your Downloads folder.</p>}
+      {saveError && (
+        <>
+          <p className="err">Automatic download failed: {saveError}.</p>
+          <button
+            className="ghost"
+            type="button"
+            onClick={() => {
+              setSaveError(null);
+              setAttempt((n) => n + 1);
+            }}
+          >
+            Try the download again
+          </button>
+        </>
+      )}
+      {!saved && !saveError && <p className="hint">Downloading the audio…</p>}
+      {/* Storage's own link, as a last resort if even the API path fails. */}
+      {url && (
+        <p className="hint">
+          <a href={url} download={filename}>
+            {saved ? "Download again" : "Or save it manually"} (
+            {Math.round(artifact.size_bytes / 1024)} KB)
+          </a>
+        </p>
+      )}
     </>
   );
 }
@@ -234,19 +429,28 @@ function VoiceChooser({
 
   return (
     <div className="panel step-active">
-      <label htmlFor="voice">Step 3 — Choose a voice</label>
+      <label>Step 3 — Choose a voice</label>
       <p className="hint">
         The script is ready. Synthesis is the slow part, so it waits for you.
       </p>
 
-      <select id="voice" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+      {/* A list rather than a <select>: collapsed, the dropdown showed only the
+          first narrator, so the cloned voices read as if they weren't there. */}
+      <ul className="voices">
         {voices.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.label}
-            {v.description ? ` — ${v.description}` : ""}
-          </option>
+          <li key={v.id}>
+            <button
+              type="button"
+              className={`voice-option${v.id === voiceId ? " selected" : ""}`}
+              aria-pressed={v.id === voiceId}
+              onClick={() => setVoiceId(v.id)}
+            >
+              <span className="voice-label">{v.label}</span>
+              {v.description && <span className="voice-desc">{v.description}</span>}
+            </button>
+          </li>
         ))}
-      </select>
+      </ul>
 
       {voices.length === 0 && !error && <p className="hint">Loading voices…</p>}
       {error && <p className="err">{error}</p>}
@@ -273,7 +477,19 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
   const [run, setRun] = useState<Run | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // id -> label, so the audio panels can name the narrator the way the picker
+  // did rather than echoing an internal id back at the user.
+  const [voiceLabels, setVoiceLabels] = useState<Record<string, string>>({});
   const abort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    api
+      .voices()
+      .then((vs) => setVoiceLabels(Object.fromEntries(vs.map((v) => [v.id, v.label]))))
+      .catch(() => {
+        /* labels are cosmetic; the raw id is a fine fallback */
+      });
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -287,6 +503,25 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  /**
+   * Backstop poll while the run is unfinished.
+   *
+   * The SSE stream is the fast path, but it is not a guarantee: it closes on
+   * its own iteration cap, on a dev-server reload, on a sleeping laptop, on any
+   * dropped connection. Without this, a stream that dies mid-synthesis leaves
+   * the page insisting the run is still going forever — the stream is the only
+   * thing that would have moved `status`, and the effect below only re-runs
+   * when `status` changes. Cheap enough to be unconditional, at a slow enough
+   * interval that the stream stays the thing you actually see updating.
+   */
+  useEffect(() => {
+    if (!run) return;
+    if (run.status === "completed" || run.status === "failed") return;
+
+    const timer = setInterval(() => void refresh(), 5000);
+    return () => clearInterval(timer);
+  }, [run?.status, refresh]);
 
   // Re-open the stream whenever the run leaves a parked state, so progress on
   // the newly released stages arrives live.
@@ -342,10 +577,17 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
   const recommendedWhy = (titlesStage?.output?.recommended_why as string | undefined) ?? "";
   const script = scriptStage?.output?.script as string | undefined;
   const estimatedMinutes = scriptStage?.output?.estimated_minutes as number | undefined;
+  // Absent on runs written before the script stage could search, and 0 when
+  // search is turned off — both mean "no live sources", so both stay hidden.
+  const webSearches = (scriptStage?.output?.web_searches as number | undefined) ?? 0;
   const review = stageOf(run, "review")?.output as
     | { passed: boolean; findings: string }
     | undefined;
   const audio = run.artifacts.find((a) => a.kind === "audio");
+  const ttsStage = stageOf(run, "tts");
+  // The human label if the voice list has loaded, the raw id otherwise — the
+  // panel heading should never be blank while synthesis is the visible step.
+  const voiceLabel = voiceLabels[run.voice_id ?? ""] ?? run.voice_id ?? "your voice";
 
   const needsTitle = run.chosen_title === null;
   const needsVoice = run.chosen_title !== null && run.voice_id === null;
@@ -366,7 +608,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
             {run.input_tokens.toLocaleString()} in / {run.output_tokens.toLocaleString()} out tokens
           </span>
           {run.tts_characters > 0 && <span>{run.tts_characters.toLocaleString()} TTS chars</span>}
-          {run.voice_id && <span>Voice {run.voice_id}</span>}
+          {run.voice_id && <span>Voice {voiceLabel}</span>}
         </div>
         {run.error && <p className="err">{run.error}</p>}
         {error && <p className="err">{error}</p>}
@@ -405,6 +647,8 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
             Script — {(scriptStage?.output?.word_count as number).toLocaleString()} words
             {estimatedMinutes !== undefined && ` · about ${estimatedMinutes} min read aloud`}
             {run.target_minutes !== null && ` · asked for ${run.target_minutes} min`}
+            {webSearches > 0 &&
+              ` · researched with ${webSearches} web ${webSearches === 1 ? "search" : "searches"}`}
           </label>
           <pre>{script}</pre>
         </div>
@@ -439,16 +683,21 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
 
       {audio && (
         <div className="panel">
-          <label>Audio</label>
-          <AudioPlayer runId={run.id} artifact={audio} />
+          <label>Audio — narrated by {voiceLabel}</label>
+          <AudioPlayer
+            runId={run.id}
+            artifact={audio}
+            title={run.chosen_title ?? run.topic}
+          />
         </div>
       )}
       {run.voice_id && !audio && run.status !== "failed" && (
-        <div className="panel">
-          <label>Audio</label>
-          <p className="hint">
-            Synthesizing… this can take several minutes for a full-length script.
-          </p>
+        <div className="panel step-active">
+          <label>Audio — narrating in {voiceLabel}</label>
+          <SynthesisProgress
+            startedAt={ttsStage?.started_at ?? null}
+            characters={script?.length ?? 0}
+          />
         </div>
       )}
 

@@ -8,13 +8,18 @@ without either.
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field
 
 from app.config import get_settings
 from app.models import StageName
 from app.pipeline import prompts
+from app.providers.base import BudgetExceeded, LLMUsage
 from app.providers.registry import get_llm, get_tts, resolve_voice
 from app.storage import put_object
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,6 +54,9 @@ class StageContext:
     # Requested narration length. Arrives with the title; None on runs created
     # before script length was selectable, which fall back to the default.
     target_minutes: int | None = None
+    # What is left of the run's budget when this stage starts. The stage passes
+    # it down so a call that resumes internally can stop itself. None = no cap.
+    budget_remaining_micros: int | None = None
 
 
 # The prompt caps titles at 70 characters. Anything materially longer is not a
@@ -135,6 +143,57 @@ def _parse_candidates(text: str, count: int) -> tuple[list[dict], str | None, st
     return candidates, recommended, recommended_why
 
 
+# Reasoning tokens count against these ceilings too, which is what makes
+# seemingly generous limits run out. Named here because the cost ceilings below
+# have to predict spend from the same numbers the stages actually send.
+TITLES_MAX_TOKENS = 8_000
+
+# Rough tokens a single search folds back into the context. Pessimistic on
+# purpose — under-predicting here would let a stage start that cannot finish
+# inside the budget.
+SEARCH_RESULT_TOKENS = 5_000
+
+
+def _tokens(text: str) -> int:
+    """Token estimate for budgeting only. ~4 characters per token is close
+    enough to size a ceiling; nothing bills off this number."""
+    return len(text) // 4
+
+
+def script_max_tokens(minutes: int, words_per_minute: int) -> int:
+    """~1.4 tokens per English word. The multiplier covers three things at
+    once: overshoot, the closing sentence, and — the big one — reasoning
+    tokens, which count against this same ceiling. A truncated script is a
+    paid call thrown away, so the headroom is cheap insurance."""
+    return min(128_000, max(4_000, int(minutes * words_per_minute * 4)))
+
+
+def review_max_tokens(script: str) -> int:
+    """Review findings are short — "OK", or a few bullets — but thinking counts
+    against the same ceiling, and how much there is to think about scales with
+    the script.
+
+    This was a flat 2,000, sized for the findings alone. That was enough for an
+    8-minute script and cut a 30-minute one off mid-response, which failed the
+    stage after the script had already been paid for.
+    """
+    return min(32_000, max(8_000, _tokens(script)))
+
+
+def _llm_ceiling_micros(
+    model: str | None, max_tokens: int, *, input_tokens: int, searches: int = 0
+) -> int:
+    """Worst case a single LLM call can cost: every allowed output token billed
+    at the output rate, every allowed search performed."""
+    return get_llm(model).cost_micros(
+        LLMUsage(
+            input_tokens=input_tokens,
+            output_tokens=max_tokens,
+            web_search_requests=searches,
+        )
+    )
+
+
 def content_hash(*parts: str) -> str:
     digest = hashlib.sha256()
     for part in parts:
@@ -154,11 +213,11 @@ def stage_titles(ctx: StageContext) -> StageResult:
     result = llm.complete(
         system=system,
         prompt=prompts.TITLES_PROMPT.format(topic=ctx.topic),
-        # Reasoning tokens count against this ceiling too, and the titles
-        # prompt asks for real deliberation before it commits. The JSON itself
-        # is ~700 tokens; the rest is headroom so a topic that needs more
-        # thinking doesn't come back truncated mid-string.
-        max_tokens=8000,
+        # The titles prompt asks for real deliberation before it commits. The
+        # JSON itself is ~700 tokens; the rest is headroom so a topic that
+        # needs more thinking doesn't come back truncated mid-string.
+        max_tokens=TITLES_MAX_TOKENS,
+        budget_micros=ctx.budget_remaining_micros,
     )
 
     candidates, recommended, recommended_why = _parse_candidates(
@@ -183,6 +242,15 @@ def stage_titles(ctx: StageContext) -> StageResult:
     )
 
 
+def titles_ceiling_micros(ctx: StageContext) -> int:
+    settings = get_settings()
+    system = prompts.TITLES_SYSTEM.format(count=settings.title_count)
+    prompt = prompts.TITLES_PROMPT.format(topic=ctx.topic)
+    return _llm_ceiling_micros(
+        settings.titles_model, TITLES_MAX_TOKENS, input_tokens=_tokens(system + prompt)
+    )
+
+
 def titles_hash(ctx: StageContext) -> str:
     # The model is part of the input: switching to a stronger one should
     # produce fresh titles rather than replaying the cached weaker set.
@@ -204,11 +272,7 @@ def stage_script(ctx: StageContext) -> StageResult:
 
     minutes = ctx.target_minutes or settings.default_script_minutes
     target_words = minutes * settings.words_per_minute
-    # ~1.4 tokens per English word. The multiplier covers three things at once:
-    # overshoot, the closing sentence, and — the big one — reasoning tokens,
-    # which count against this same ceiling. A truncated script is a paid call
-    # thrown away, so the headroom is cheap insurance.
-    max_tokens = min(128_000, max(4_000, int(target_words * 4)))
+    max_tokens = script_max_tokens(minutes, settings.words_per_minute)
 
     result = llm.complete(
         system=prompts.SCRIPT_SYSTEM.format(
@@ -216,6 +280,11 @@ def stage_script(ctx: StageContext) -> StageResult:
         ),
         prompt=prompts.SCRIPT_PROMPT.format(title=title, topic=ctx.topic),
         max_tokens=max_tokens,
+        # Ground the script in what has actually been said and published on the
+        # topic rather than in recalled knowledge. Accuracy is what makes the
+        # awe land, and it is the one thing a viewer can catch us getting wrong.
+        web_search=settings.script_web_search,
+        budget_micros=ctx.budget_remaining_micros,
     )
 
     script = result.text
@@ -235,6 +304,10 @@ def stage_script(ctx: StageContext) -> StageResult:
             # What the script will actually take to read at the configured
             # pace, so the UI can show the gap against what was asked for.
             "estimated_minutes": round(word_count / settings.words_per_minute, 1),
+            # How much live research went into this. Zero means the script came
+            # out of the model's own knowledge — worth knowing before trusting
+            # a specific figure in it.
+            "web_searches": result.usage.web_search_requests,
             "script": script,
         },
         input_tokens=result.usage.input_tokens,
@@ -252,11 +325,36 @@ def stage_script(ctx: StageContext) -> StageResult:
     )
 
 
+def script_ceiling_micros(ctx: StageContext) -> int:
+    settings = get_settings()
+    minutes = ctx.target_minutes or settings.default_script_minutes
+    target_words = minutes * settings.words_per_minute
+    system = prompts.SCRIPT_SYSTEM.format(
+        words=target_words, minutes=minutes, wpm=settings.words_per_minute
+    )
+    prompt = prompts.SCRIPT_PROMPT.format(title=ctx.chosen_title or "", topic=ctx.topic)
+    searches = settings.web_search_max_uses if settings.script_web_search else 0
+    return _llm_ceiling_micros(
+        None,
+        script_max_tokens(minutes, settings.words_per_minute),
+        # Search results re-enter the context as input, so they are billed
+        # twice over: once per search, once as tokens the model then reads.
+        input_tokens=_tokens(system + prompt) + searches * SEARCH_RESULT_TOKENS,
+        searches=searches,
+    )
+
+
 def script_hash(ctx: StageContext) -> str:
     # Length is part of the input: asking for 25 minutes after 5 must not
-    # reuse the 5-minute script from the cache.
+    # reuse the 5-minute script from the cache. So is grounding — turning
+    # search on should produce a researched script, not replay the one written
+    # from memory.
     return content_hash(
-        "script", ctx.topic, ctx.chosen_title or "", str(ctx.target_minutes or "")
+        "script",
+        ctx.topic,
+        ctx.chosen_title or "",
+        str(ctx.target_minutes or ""),
+        str(get_settings().script_web_search),
     )
 
 
@@ -272,20 +370,52 @@ def stage_review(ctx: StageContext) -> StageResult:
     llm = get_llm()
     script = ctx.prior[StageName.script.value]["script"]
 
-    result = llm.complete(
-        system=prompts.REVIEW_SYSTEM,
-        prompt=prompts.REVIEW_PROMPT.format(script=script),
-        max_tokens=2000,
-    )
+    try:
+        result = llm.complete(
+            system=prompts.REVIEW_SYSTEM,
+            prompt=prompts.REVIEW_PROMPT.format(script=script),
+            max_tokens=review_max_tokens(script),
+            budget_micros=ctx.budget_remaining_micros,
+        )
+    except BudgetExceeded:
+        # The one failure worth stopping for: the money is gone, and carrying
+        # on would spend more of it on synthesis.
+        raise
+    except Exception as exc:  # noqa: BLE001 - reported to the user, not swallowed
+        # Anything else and the gate steps aside. It is advisory by design, and
+        # a run that dies here has already paid for a finished script — losing
+        # that to a failed opinion about it is the worse outcome. The finding
+        # says the check did not run, so nobody reads silence as approval.
+        log.warning("run=%s review could not run: %s", ctx.run_id, exc)
+        return StageResult(
+            output={
+                "passed": False,
+                "ran": False,
+                "findings": (
+                    f"The automated review could not run ({type(exc).__name__}: {exc}). "
+                    "This says nothing about the script — it was not checked. "
+                    "Read it yourself before publishing."
+                ),
+            }
+        )
 
     verdict = result.text.strip()
     passed = verdict.upper().startswith("OK")
 
     return StageResult(
-        output={"passed": passed, "findings": "" if passed else verdict},
+        output={"passed": passed, "ran": True, "findings": "" if passed else verdict},
         input_tokens=result.usage.input_tokens,
         output_tokens=result.usage.output_tokens,
         cost_micros=llm.cost_micros(result.usage),
+    )
+
+
+def review_ceiling_micros(ctx: StageContext) -> int:
+    script = ctx.prior[StageName.script.value]["script"]
+    return _llm_ceiling_micros(
+        None,
+        review_max_tokens(script),
+        input_tokens=_tokens(prompts.REVIEW_SYSTEM + script),
     )
 
 
@@ -330,9 +460,27 @@ def stage_tts(ctx: StageContext) -> StageResult:
     )
 
 
+def tts_ceiling_micros(ctx: StageContext) -> int:
+    # Exact rather than estimated: the script is already written, and TTS bills
+    # per character of it.
+    script = ctx.prior[StageName.script.value]["script"]
+    return get_tts().cost_micros(len(script))
+
+
 def tts_hash(ctx: StageContext) -> str:
+    # The voice knobs are part of the input, the same way the model is for
+    # titles: they decide what the audio sounds like, so retrying after
+    # changing one must re-synthesize rather than replay the old delivery.
+    settings = get_settings()
     return content_hash(
-        "tts", ctx.prior[StageName.script.value]["script"], ctx.voice_id or "", get_tts().name
+        "tts",
+        ctx.prior[StageName.script.value]["script"],
+        ctx.voice_id or "",
+        get_tts().name,
+        str(settings.tts_local_temperature),
+        str(settings.tts_local_exaggeration),
+        str(settings.tts_local_cfg_weight),
+        str(settings.tts_local_speed_factor),
     )
 
 
@@ -390,4 +538,15 @@ STAGE_IMPLS = {
     StageName.review: (stage_review, review_hash),
     StageName.tts: (stage_tts, tts_hash),
     StageName.package: (stage_package, package_hash),
+}
+
+# The most each stage could possibly cost, so the runner can refuse to start
+# one the remaining budget cannot cover. Kept beside STAGE_IMPLS rather than
+# inside it: a stage that spends nothing needs no entry, and packaging is pure
+# local work.
+STAGE_COST_CEILINGS = {
+    StageName.titles: titles_ceiling_micros,
+    StageName.script: script_ceiling_micros,
+    StageName.review: review_ceiling_micros,
+    StageName.tts: tts_ceiling_micros,
 }

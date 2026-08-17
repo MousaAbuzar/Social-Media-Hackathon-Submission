@@ -1,0 +1,16 @@
+{
+  "title": "Black Holes Don't Pull You In the Way You Think",
+  "alternate_titles": [
+    "What Would Happen If You Fell Into a Black Hole?",
+    "Squeeze Earth Down to 9 Millimeters and You Get a Black Hole",
+    "Why a Black Hole Is Nothing Like an Actual Hole",
+    "Why Black Holes Slowly Glow Themselves to Death"
+  ],
+  "topic": "what is a black hole",
+  "word_count": 334,
+  "estimated_minutes": 2.2,
+  "voice_id": "narrator_mine",
+  "review_passed": false,
+  "review_findings": "- Markdown emphasis in the body text: \"you can now get \\*close\\*\" \u2014 the asterisks may be voiced or garbled by TTS; strip them and convey emphasis through wording or SSML.\n\nOtherwise clean: no attributed quotations, no second speaker, no stage directions, and the numbers given (Sun ~1.4 million km across, ~700,000 km radius, ~6 km black-hole diameter for solar mass, 365-day orbit) are consistent with accepted values.",
+  "disclosure": "This video's narration is synthetic, generated with a text-to-speech voice from a written script. It is not the voice of, written by, or affiliated with any real person."
+}

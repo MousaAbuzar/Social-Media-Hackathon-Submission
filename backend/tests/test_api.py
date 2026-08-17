@@ -4,6 +4,8 @@ Uses an in-memory async SQLite database and a stubbed task queue, so the HTTP
 contract is verified without Postgres, Redis, or a worker.
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool
@@ -11,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base, get_session
 from app.main import app
+from app.models import Run, RunStatus, Stage, StageName, StageStatus
 
 TOKEN = "dev-local-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -37,6 +40,9 @@ def client(monkeypatch):
         # TestClient's portal runs the async setup for us.
         test_client.portal.call(_create_schema, engine)
         test_client.enqueued = enqueued
+        # Exposed so tests can seed rows the API only ever reads, like the
+        # finished stages the synthesis-rate estimate is measured from.
+        test_client.maker = maker
         yield test_client
     app.dependency_overrides.clear()
 
@@ -62,6 +68,58 @@ def test_voices_are_listed(client):
     response = client.get("/api/voices", headers=AUTH)
     assert response.status_code == 200
     assert any(v["id"] == "narrator_default" for v in response.json())
+
+
+def seed_tts_stage(client, *, characters: int, seconds: float, provider: str = "fake") -> None:
+    """A finished synthesis in the history the rate estimate reads from."""
+
+    async def _seed():
+        async with client.maker() as session:
+            run = Run(topic="Seeded", status=RunStatus.completed)
+            session.add(run)
+            await session.flush()
+            started = datetime(2026, 1, 1, tzinfo=UTC)
+            session.add(
+                Stage(
+                    run_id=run.id,
+                    name=StageName.tts,
+                    position=3,
+                    status=StageStatus.completed,
+                    output={"characters": characters, "provider": provider},
+                    started_at=started,
+                    finished_at=started + timedelta(seconds=seconds),
+                )
+            )
+            await session.commit()
+
+    client.portal.call(_seed)
+
+
+def test_tts_rate_falls_back_to_the_configured_default(client):
+    body = client.get("/api/tts/rate", headers=AUTH).json()
+    assert body == {"chars_per_second": 5.0, "source": "default", "samples": 0}
+
+
+def test_tts_rate_is_measured_from_finished_runs(client):
+    seed_tts_stage(client, characters=1000, seconds=100)
+    body = client.get("/api/tts/rate", headers=AUTH).json()
+    assert body["source"] == "measured"
+    assert body["samples"] == 1
+    assert body["chars_per_second"] == 10.0
+
+
+def test_tts_rate_ignores_other_providers(client):
+    # A run on a different (here, much faster) provider says nothing about how
+    # long the configured one will take.
+    seed_tts_stage(client, characters=1_000_000, seconds=2, provider="somethingelse")
+    body = client.get("/api/tts/rate", headers=AUTH).json()
+    assert body["source"] == "default"
+
+
+def test_tts_rate_ignores_cache_replays(client):
+    # Sub-second "synthesis" is a cache hit, not a measurement.
+    seed_tts_stage(client, characters=5000, seconds=0.2)
+    assert client.get("/api/tts/rate", headers=AUTH).json()["source"] == "default"
 
 
 def test_create_run_takes_a_topic_only(client):

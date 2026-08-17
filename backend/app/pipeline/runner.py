@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import (
     STAGE_GATES,
     STAGE_ORDER,
@@ -27,11 +28,29 @@ from app.models import (
     Stage,
     StageStatus,
 )
-from app.pipeline.stages import STAGE_IMPLS, StageContext
+from app.pipeline.stages import STAGE_COST_CEILINGS, STAGE_IMPLS, StageContext
 
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
+
+
+def _usd(micros: int) -> str:
+    return f"${micros / 1_000_000:.2f}"
+
+
+def _halt_over_budget(run: Run, reason: str) -> None:
+    """Stop the run for good. Budget failures are not retryable: retrying
+    spends more of exactly what ran out, so the stage is marked failed rather
+    than left pending for another attempt."""
+    log.warning("run=%s halted on budget: %s", run.id, reason)
+    run.status = RunStatus.failed
+    run.error = reason
+    stage = next_pending_stage(run)
+    if stage is not None:
+        stage.status = StageStatus.failed
+        stage.error = reason
+        stage.finished_at = datetime.now(UTC)
 
 
 def create_stage_rows(session: Session, run: Run) -> None:
@@ -83,6 +102,9 @@ def advance(session: Session, run_id: str) -> bool:
         session.commit()
         return False
 
+    budget = get_settings().run_budget_micros
+    remaining = budget - run.cost_micros
+
     run.status = RunStatus.running
     ctx = StageContext(
         run_id=str(run.id),
@@ -91,6 +113,7 @@ def advance(session: Session, run_id: str) -> bool:
         voice_id=run.voice_id,
         prior=_prior_outputs(run),
         target_minutes=run.target_minutes,
+        budget_remaining_micros=remaining,
     )
 
     impl, hash_fn = STAGE_IMPLS[stage.name]
@@ -103,6 +126,21 @@ def advance(session: Session, run_id: str) -> bool:
         stage.finished_at = datetime.now(UTC)
         session.commit()
         return True
+
+    # Refuse to start a stage the remaining budget cannot cover. Checked after
+    # the cache hit above, so replaying already-paid work stays free even on a
+    # run that has spent most of its allowance.
+    ceiling_fn = STAGE_COST_CEILINGS.get(stage.name)
+    ceiling = ceiling_fn(ctx) if ceiling_fn else 0
+    if ceiling > remaining:
+        _halt_over_budget(
+            run,
+            f"Stage {stage.name.value} could cost up to {_usd(ceiling)} but only "
+            f"{_usd(remaining)} of the {_usd(budget)} run budget is left. "
+            f"Raise RUN_BUDGET_USD or ask for a shorter script.",
+        )
+        session.commit()
+        return False
 
     stage.status = StageStatus.running
     stage.attempt += 1
@@ -134,6 +172,23 @@ def advance(session: Session, run_id: str) -> bool:
     run.output_tokens += result.output_tokens
     run.tts_characters += result.tts_characters
     run.cost_micros += result.cost_micros
+
+    # Backstop. The ceiling above should make this unreachable, so if it fires
+    # a ceiling under-predicted — a stale price in the table, a provider
+    # reporting usage we didn't model. Keep the completed work and its cost on
+    # record, then stop: the alternative is discovering the gap one stage later
+    # having spent more.
+    if run.cost_micros > budget:
+        stage.output = result.output
+        stage.status = StageStatus.completed
+        stage.finished_at = datetime.now(UTC)
+        _halt_over_budget(
+            run,
+            f"Run spent {_usd(run.cost_micros)}, over the {_usd(budget)} budget, "
+            f"during stage {stage.name.value}. Stopped before the next stage.",
+        )
+        session.commit()
+        return False
 
     # The titles stage deliberately does not set chosen_title — that is the
     # user's decision, and leaving it empty is what parks the run at the gate.
