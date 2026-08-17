@@ -4,7 +4,7 @@
 
 ### A topic goes in. A finished, narrated, upload-ready video script comes out.
 
-**ScriptCast is a durable, fault-tolerant content pipeline that turns a one-line idea into a researched narration script, a cloned-voice audio track, and a publish-ready metadata bundle — running entirely on one machine, for $0.00 a run.**
+**ScriptCast is a durable, fault-tolerant content pipeline that turns a one-line idea into a researched narration script, a cloned-voice audio track, and a publish-ready metadata bundle — running entirely on one machine, with the narration synthesized locally for $0.00.**
 
 <br>
 
@@ -16,7 +16,7 @@
 [![Claude](https://img.shields.io/badge/Claude-Opus%205-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://claude.com)
 
 [![Tests](https://img.shields.io/badge/tests-123%20passing-brightgreen?style=flat-square)](#-tests)
-[![Cost per run](https://img.shields.io/badge/cost%20per%20run-%240.00%20(self--hosted%20TTS)-blue?style=flat-square)](#-the-zero-cost-voice)
+[![Voice cost](https://img.shields.io/badge/voice-%240.00%20per%20run%20(self--hosted)-blue?style=flat-square)](#-the-zero-cost-voice)
 [![Runs offline](https://img.shields.io/badge/runs-fully%20offline-8A2BE2?style=flat-square)](#-no-key-no-network-no-spend)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](#)
 
@@ -44,7 +44,7 @@ upload metadata. Nothing hand-edited.
 
 ## 🚀 This isn't a demo. It's in production.
 
-ScriptCast is **the actual production pipeline behind a real, live YouTube channel — "YouTube name here"** — a long-form educational science channel. Every video published there starts as a single line typed into this UI and ends as a `.wav` file and a metadata bundle rendered by this pipeline, on a laptop, in the next room.
+ScriptCast is **the actual production pipeline behind a live, long-form educational science channel.** Every video published there starts as a single line typed into this UI and ends as a `.wav` file and a metadata bundle rendered by this pipeline, on a laptop, in the next room.
 
 That constraint shaped every design decision in this repo:
 
@@ -199,7 +199,7 @@ Not advisory. Enforced at three layers:
 2. **Inside a single call** — the LLM adapter aborts mid-flight if a server-side tool loop crosses the ceiling, raising a typed `BudgetExceeded` so callers can tell *"this broke"* from *"we ran out of money"*.
 3. **After the fact** — a backstop halts the run if realized spend crosses the line anyway, keeping the completed work on record.
 
-Default ceiling: **$3.00/run**. A typical 8-minute researched script comes in well under $0.50.
+Default ceiling: **$3.00/run** — a runaway guard, not a normal constraint. For scale: the [committed example run](examples/) — a researched 2-minute script with 4 live web searches — cost **$0.57**, nearly all of it the search results coming back into the context window.
 
 ### 🔌 A provider abstraction that earned its keep
 
@@ -209,7 +209,7 @@ This wasn't theoretical. Swapping a paid hosted TTS vendor for **a GPU in the ne
 
 ### 🎧 The zero-cost voice
 
-`TTS_PROVIDER=local` points the pipeline at a [Chatterbox](https://github.com/devnen/Chatterbox-TTS-Server) server on your own hardware. It **clones a narration voice from a 15–30 second sample**, needs no account and no API key, and reports a cost per run of `$0.00` — which is literally true, not rounded.
+`TTS_PROVIDER=local` points the pipeline at a [Chatterbox](https://github.com/devnen/Chatterbox-TTS-Server) server on your own hardware. It **clones a narration voice from a 15–30 second sample**, needs no account and no API key, and reports a synthesis cost of `$0.00` — which is literally true, not rounded. The only spend left in a run is the Claude calls; the [example run](examples/) came in at **$0.57** for a researched 2-minute script.
 
 The generation knobs are a deliberate house style, not the server's defaults: steadier than stock so delivery doesn't drift between the chunks of a 30-minute narration, and considerably more expressive so it reads as documentary rather than flat. Long scripts are split across bounded HTTP requests, so a network blip costs one chunk instead of an hour of synthesis.
 
