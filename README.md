@@ -26,7 +26,7 @@
 
 ## 🚀 This isn't a demo. It's in production.
 
-ScriptCast is **the actual production pipeline behind a real, live YouTube channel — "YouTube name here"** — a long-form educational science channel. Every video published there starts as a single line typed into this UI and ends as a `.wav` file and a metadata bundle rendered by this pipeline, on a laptop, in the next room.
+ScriptCast is **the actual production pipeline behind a real, live YouTube channel — "Cosmic Quests** — a long-form educational science channel. Every video published there starts as a single line typed into this UI and ends as a `.wav` file and a metadata bundle rendered by this pipeline, on a laptop, in the next room.
 
 That constraint shaped every design decision in this repo:
 
